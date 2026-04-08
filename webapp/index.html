@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Skull VPN Mini App</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <div class="bg-glow bg-glow-a"></div>
+    <div class="bg-glow bg-glow-b"></div>
+
+    <main class="app">
+      <header class="hero">
+        <p class="badge">Skull VPN</p>
+        <h1 id="statusTitle">Защита не активна</h1>
+        <p class="subtitle" id="statusSubtitle">Подключитесь к VPN через Amnezia</p>
+        <p class="subtitle" id="userLine">Проверяем профиль...</p>
+      </header>
+
+      <section class="panel status-panel">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <h2>Статус</h2>
+            <span class="status-chip status-red" id="statusChip">🔴 VPN не обнаружен</span>
+          </div>
+          <button id="onboardingHelpBtn" class="btn ghost btn-compact">ℹ️ Как подключиться</button>
+        </div>
+        <p class="state-hint" id="stateHint">Нажмите кнопку ниже, чтобы открыть Amnezia.</p>
+        <p class="tiny-note" id="connectHint">Откроется приложение Amnezia</p>
+        <div class="actions stack">
+          <button id="connectBtn" class="btn primary">🚀 Подключиться</button>
+
+          <button id="openAgainBtn" class="btn ghost hidden">📲 Открыть Amnezia ещё раз</button>
+          <button id="checkBtn" class="btn ghost hidden">🔍 Проверить подключение</button>
+          <button id="disconnectBtn" class="btn ghost hidden">🔌 Отключить (инструкция)</button>
+          <button id="installBtn" class="btn ghost hidden">Установить Amnezia</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Серверы</h2>
+          <span class="server-pill" id="serverValue">🌍 Нидерланды</span>
+        </div>
+        <div class="server-group-label">Бесплатные серверы</div>
+        <div class="server-list" id="serverList"></div>
+        <div class="server-group-label server-group-paid">Платные серверы</div>
+        <div class="server-list" id="paidServerList"></div>
+        <div class="actions two-col">
+          <button id="autoServerBtn" class="btn ghost">⚡ Автоматически выбрать лучший</button>
+          <button id="changeServerBtn" class="btn ghost">Сменить сервер</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Подписка</h2>
+          <span class="value-inline" id="timeLeftValue">⏳ Доступ: 24 часа</span>
+        </div>
+        <p class="warning hidden" id="timeWarning">Скоро закончится</p>
+        <div class="tariff-list" id="tariffList"></div>
+        <p class="tiny-note" id="selectedTariffHint">Выбран тариф: Базовый</p>
+        <button id="subscriptionBtn" class="btn ghost">💳 Оплатить выбранный тариф</button>
+      </section>
+
+      <section class="panel referral-panel">
+        <h2>Реферальная программа</h2>
+        <p>Пригласи друга и получи +3 дня VPN.</p>
+        <div class="ref-box">
+          <input id="refLink" readonly />
+          <button id="copyRefBtn" class="btn tiny">Копировать</button>
+        </div>
+      </section>
+    </main>
+
+    <section class="onboarding hidden" id="onboarding">
+      <div class="onboarding-card">
+        <h2>Как подключиться</h2>
+        <ol>
+          <li>Нажмите «Подключиться»</li>
+          <li>Откроется Amnezia</li>
+          <li>Подтвердите импорт</li>
+          <li>Готово</li>
+        </ol>
+        <button id="onboardingBtn" class="btn primary">Понятно</button>
+      </div>
+    </section>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
