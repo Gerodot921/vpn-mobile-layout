@@ -254,6 +254,9 @@ def _build_config_text(profile: WireGuardProfile) -> str:
         f"PublicKey = {server_public_key}",
     ]
 
+    if profile["preshared_key"]:
+        lines.append(f"PresharedKey = {profile['preshared_key']}")
+
     lines.extend(
         [
             f"AllowedIPs = {profile['allowed_ips']}",
@@ -273,6 +276,7 @@ def _build_profile_filename(profile_id: str) -> str:
 def _build_profile(user_id: int, state: WireGuardState) -> WireGuardProfile:
     private_key = _generate_private_key()
     public_key = _derive_public_key(private_key)
+    preshared_key = _generate_preshared_key()
     address = _build_address(_next_client_octet(state))
     profile_id = _profile_id()
     created_at = _now_utc().isoformat()
@@ -282,7 +286,7 @@ def _build_profile(user_id: int, state: WireGuardState) -> WireGuardProfile:
         "user_id": user_id,
         "private_key": private_key,
         "public_key": public_key,
-        "preshared_key": "",
+        "preshared_key": preshared_key,
         "address": address,
         "endpoint": _server_endpoint(),
         "dns": _configured_dns(),
@@ -313,7 +317,8 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
         profile["dns"] = _configured_dns()
         profile["allowed_ips"] = _configured_allowed_ips()
         profile["mtu"] = _configured_mtu()
-        profile["preshared_key"] = ""
+        if not profile.get("preshared_key"):
+            profile["preshared_key"] = _generate_preshared_key()
         profile["configured"] = is_wireguard_configured()
         profile["updated_at"] = _now_utc().isoformat()
         profile["config_text"] = _build_config_text(profile)
@@ -358,19 +363,41 @@ def add_peer_to_server(user_id: int) -> bool:
 
     client_public_key = profile["public_key"]
     client_address = profile["address"]
+    client_preshared_key = profile.get("preshared_key", "")
 
-    cmd = [
-        "docker",
-        "exec",
-        docker_container,
-        "wg",
-        "set",
-        interface_name,
-        "peer",
-        client_public_key,
-        "allowed-ips",
-        client_address,
-    ]
+    if client_preshared_key:
+        cmd = [
+            "docker",
+            "exec",
+            "-e",
+            f"WG_PUBLIC_KEY={client_public_key}",
+            "-e",
+            f"WG_PRESHARED_KEY={client_preshared_key}",
+            "-e",
+            f"WG_ALLOWED_IPS={client_address}",
+            docker_container,
+            "sh",
+            "-lc",
+            (
+                "tmp=$(mktemp); "
+                "printf '%s' \"$WG_PRESHARED_KEY\" > \"$tmp\"; "
+                f"wg set {interface_name} peer \"$WG_PUBLIC_KEY\" preshared-key \"$tmp\" allowed-ips \"$WG_ALLOWED_IPS\"; "
+                "status=$?; rm -f \"$tmp\"; exit $status"
+            ),
+        ]
+    else:
+        cmd = [
+            "docker",
+            "exec",
+            docker_container,
+            "wg",
+            "set",
+            interface_name,
+            "peer",
+            client_public_key,
+            "allowed-ips",
+            client_address,
+        ]
 
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=10, text=True)
