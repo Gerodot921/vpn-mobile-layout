@@ -1,10 +1,11 @@
 import asyncio
+import logging
 import os
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
@@ -15,6 +16,7 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
+from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
 
 router = Router()
 
@@ -96,3 +98,36 @@ async def get_sms(message: Message) -> None:
 @router.callback_query(lambda c: c.data == "mini_app_not_configured")
 async def mini_app_not_configured(callback: CallbackQuery) -> None:
     await callback.answer(MINI_APP_NOT_CONFIGURED_TEXT, show_alert=True)
+
+
+@router.message(Command(commands=["profile", "wg", "conf"]))
+async def send_wireguard_profile(message: Message) -> None:
+    if not message.from_user:
+        return
+
+    user_id = message.from_user.id
+    ensure_wireguard_profile(user_id)
+    config_text = get_wireguard_config_text(user_id)
+
+    if not config_text:
+        await message.answer("Не удалось собрать профиль. Попробуйте еще раз через 10 секунд.")
+        return
+
+    filename = get_wireguard_config_filename(user_id)
+
+    try:
+        await message.answer_document(
+            BufferedInputFile(config_text.encode("utf-8"), filename=filename),
+            caption="Ваш профиль WireGuard / AmneziaWG (.conf)",
+        )
+    except Exception:
+        logging.exception("Failed to send .conf document for user_id=%s", user_id)
+        await message.answer(
+            "Не удалось отправить файл как документ. Ниже отправляю конфиг текстом:"
+        )
+        await message.answer(f"{filename}\n\n{config_text}")
+
+
+@router.message(F.text.in_({"profile", "Profile", "профиль", "конфиг", "config"}))
+async def send_wireguard_profile_text_alias(message: Message) -> None:
+    await send_wireguard_profile(message)

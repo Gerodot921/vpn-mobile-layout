@@ -4,7 +4,7 @@ import json
 import logging
 
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
 from app.free_access import (
     DEFAULT_FREE_ACCESS_HOURS,
@@ -13,6 +13,7 @@ from app.free_access import (
 )
 from app.referrals import ensure_user
 from app.subscriptions import ensure_subscription
+from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
 
 router = Router()
@@ -75,3 +76,18 @@ async def webapp_data(message: Message) -> None:
             ),
             disable_web_page_preview=True,
         )
+
+    config_text = get_wireguard_config_text(user_id)
+    if config_text:
+        filename = get_wireguard_config_filename(user_id)
+        try:
+            await message.answer_document(
+                BufferedInputFile(config_text.encode("utf-8"), filename=filename),
+                caption="Профиль WireGuard / AmneziaWG",
+            )
+            add_peer_to_server(user_id)
+        except Exception:
+            logging.exception("Failed to send WebApp .conf document for user_id=%s", user_id)
+            await message.answer(f"Не удалось отправить файл документом. Конфиг:\n{filename}\n\n{config_text}")
+    else:
+        logging.warning("WireGuard config text is empty in webapp flow for user_id=%s", user_id)

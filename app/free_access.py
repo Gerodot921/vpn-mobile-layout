@@ -7,6 +7,7 @@ from threading import Lock
 from typing import TypedDict
 
 from app.json_storage import load_json_file, save_json_file
+from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename
 
 FREE_ACCESS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "free_access.json"
 DEFAULT_FREE_ACCESS_HOURS = 2
@@ -20,6 +21,10 @@ class FreeAccessRecord(TypedDict):
     expires_at: str
     claims_count: int
     source: str
+    vpn_protocol: str
+    vpn_profile_name: str
+    vpn_config_name: str
+    vpn_configured: bool
 
 
 FreeAccessState = dict[str, FreeAccessRecord]
@@ -58,12 +63,21 @@ def _load_state() -> FreeAccessState:
         if not isinstance(claims_count, int):
             claims_count = 0
 
+        vpn_protocol = value.get("vpn_protocol", "WireGuard")
+        vpn_profile_name = value.get("vpn_profile_name", access_key)
+        vpn_config_name = value.get("vpn_config_name", f"skull-vpn-{access_key}.conf")
+        vpn_configured = value.get("vpn_configured", False)
+
         state[key] = {
             "access_key": access_key,
             "granted_at": granted_at,
             "expires_at": expires_at,
             "claims_count": claims_count,
             "source": source if isinstance(source, str) and source else "mini_app_ad",
+            "vpn_protocol": vpn_protocol if isinstance(vpn_protocol, str) and vpn_protocol else "WireGuard",
+            "vpn_profile_name": vpn_profile_name if isinstance(vpn_profile_name, str) and vpn_profile_name else access_key,
+            "vpn_config_name": vpn_config_name if isinstance(vpn_config_name, str) and vpn_config_name else f"skull-vpn-{access_key}.conf",
+            "vpn_configured": bool(vpn_configured),
         }
 
     return state
@@ -140,6 +154,7 @@ def grant_free_access(
         state = _load_state()
         now = _now_utc()
         current = state.get(user_key)
+        profile = ensure_wireguard_profile(user_id)
 
         if current is not None:
             try:
@@ -153,11 +168,15 @@ def grant_free_access(
             base_expires_at = now
 
         new_record: FreeAccessRecord = {
-            "access_key": _new_key(),
+            "access_key": profile["profile_id"],
             "granted_at": now.isoformat(),
             "expires_at": (base_expires_at + timedelta(hours=hours)).isoformat(),
             "claims_count": (current.get("claims_count", 0) if current else 0) + 1,
             "source": source,
+            "vpn_protocol": "WireGuard",
+            "vpn_profile_name": profile["profile_id"],
+            "vpn_config_name": get_wireguard_config_filename(user_id),
+            "vpn_configured": profile["configured"],
         }
         state[user_key] = new_record
         _save_state(state)

@@ -1,7 +1,7 @@
 ﻿import logging
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import BufferedInputFile, CallbackQuery
 
 from app.free_access import format_free_access_remaining_text, get_free_access_record
 from app.keyboards.inline import (
@@ -15,6 +15,7 @@ from app.keyboards.inline import (
     support_inline_keyboard,
 )
 from app.referrals import activate_user_and_apply_bonus, ensure_user
+from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.texts import (
     CONNECTED_TEXT,
     DEMO_LINK_TEXT,
@@ -95,8 +96,35 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
                 ),
                 disable_web_page_preview=True,
             )
+            referrer_config_text = get_wireguard_config_text(referrer_id)
+            if referrer_config_text:
+                await callback.bot.send_document(
+                    referrer_id,
+                    BufferedInputFile(
+                        referrer_config_text.encode("utf-8"),
+                        filename=get_wireguard_config_filename(referrer_id),
+                    ),
+                    caption="Профиль WireGuard / AmneziaWG",
+                )
+                add_peer_to_server(referrer_id)
     except Exception:
         pass
+
+    if invitee_record is not None:
+        invitee_config_text = get_wireguard_config_text(user_id)
+        if invitee_config_text:
+            try:
+                await callback.bot.send_document(
+                    user_id,
+                    BufferedInputFile(
+                        invitee_config_text.encode("utf-8"),
+                        filename=get_wireguard_config_filename(user_id),
+                    ),
+                    caption="Профиль WireGuard / AmneziaWG",
+                )
+                add_peer_to_server(user_id)
+            except Exception:
+                pass
 
 
 def _connected_demo_text() -> str:

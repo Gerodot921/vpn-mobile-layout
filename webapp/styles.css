@@ -377,8 +377,28 @@ body {
 }
 
 .value-inline {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
   font-size: 14px;
   font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.value-inline.copyable {
+  border-color: rgba(36, 165, 255, 0.45);
+  background: rgba(36, 165, 255, 0.1);
+  cursor: pointer;
+}
+
+.value-inline.copyable:active {
+  transform: translateY(1px);
+}
+
+.value-inline:disabled {
+  opacity: 1;
 }
 
 .reward-actions {

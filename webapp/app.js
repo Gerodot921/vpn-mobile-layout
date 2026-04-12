@@ -355,33 +355,52 @@ function syncFreeAccessPanel() {
   const rewardRemaining = state.rewardReadyAt - now;
 
   if (accessRemaining > 0) {
-    freeAccessValue.textContent = `🔑 ${formatDurationShort(accessRemaining)}`;
+    if (state.freeAccessKey) {
+      freeAccessValue.textContent = `🔑 ${state.freeAccessKey}`;
+      freeAccessValue.classList.add("copyable");
+      freeAccessValue.disabled = false;
+      freeAccessValue.title = "Нажмите, чтобы скопировать";
+    } else {
+      freeAccessValue.textContent = `🔑 ${formatDurationShort(accessRemaining)}`;
+      freeAccessValue.classList.remove("copyable");
+      freeAccessValue.disabled = true;
+      freeAccessValue.title = "";
+    }
     if (state.freeAccessSource === "referral") {
       rewardStatus.textContent = "Вы пришли по приглашению. Реклама не нужна.";
     } else {
-      rewardStatus.textContent = "Ключ активен. Выберите бесплатный сервер и подключайтесь.";
+      rewardStatus.textContent = "Профиль активен. Выберите бесплатный сервер и подключайтесь.";
     }
     rewardTimer.textContent = `Доступ действует ещё ${formatDurationShort(accessRemaining)}.`;
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.add("hidden");
   } else if (rewardRemaining > 0) {
     freeAccessValue.textContent = "🔒 Не активирован";
-    rewardStatus.textContent = "Реклама просмотрена. Заберите ключ после таймера.";
-    rewardTimer.textContent = `Можно получить ключ через ${formatDurationShort(rewardRemaining)}.`;
+    freeAccessValue.classList.remove("copyable");
+    freeAccessValue.disabled = true;
+    freeAccessValue.title = "";
+    rewardStatus.textContent = "Реклама просмотрена. Заберите профиль после таймера.";
+    rewardTimer.textContent = `Можно получить профиль через ${formatDurationShort(rewardRemaining)}.`;
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
     claimAccessBtn.disabled = true;
   } else if (state.rewardReadyAt > 0) {
     freeAccessValue.textContent = "🔒 Не активирован";
-    rewardStatus.textContent = "Реклама просмотрена. Ключ можно забрать.";
-    rewardTimer.textContent = "Нажмите кнопку получения ключа.";
+    freeAccessValue.classList.remove("copyable");
+    freeAccessValue.disabled = true;
+    freeAccessValue.title = "";
+    rewardStatus.textContent = "Реклама просмотрена. Профиль можно забрать.";
+    rewardTimer.textContent = "Нажмите кнопку получения профиля.";
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
     claimAccessBtn.disabled = false;
   } else {
     freeAccessValue.textContent = "🔒 Не активирован";
-    rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите ключ на 2 часа.";
-    rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения ключа.";
+    freeAccessValue.classList.remove("copyable");
+    freeAccessValue.disabled = true;
+    freeAccessValue.title = "";
+    rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите профиль WireGuard на 2 часа.";
+    rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения профиля.";
     watchAdBtn.classList.remove("hidden");
     claimAccessBtn.classList.add("hidden");
   }
@@ -397,7 +416,7 @@ function openRewardAd() {
     window.open(REWARD_AD_URL, "_blank", "noopener,noreferrer");
   }
 
-  showToast("Реклама открыта. После просмотра получите ключ на 2 часа.");
+  showToast("Реклама открыта. После просмотра получите профиль на 2 часа.");
 }
 
 
@@ -574,7 +593,7 @@ function openConfigInAmnezia() {
   const active = currentServer();
   if (!canAccessServer(active)) {
     if (active.access === "free") {
-      showToast("Сначала получите бесплатный ключ на 2 часа");
+      showToast("Сначала получите бесплатный WireGuard-профиль на 2 часа");
       watchAdBtn.click();
     } else {
       showToast("Для этого сервера нужна подписка");
@@ -589,7 +608,7 @@ function openConfigInAmnezia() {
     return;
   }
 
-  showToast("Добавьте реальную ссылку vless://, vmess:// или ss:// в app.js");
+  showToast("WireGuard-профиль еще не подключен к Mini App. Получите его в Telegram-боте.");
 }
 
 function tryOpenAmnezia() {
@@ -686,6 +705,19 @@ copyRefBtn.addEventListener("click", async () => {
   }
 });
 
+freeAccessValue.addEventListener("click", async () => {
+  if (!state.freeAccessKey) {
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(state.freeAccessKey);
+    showToast("Ключ скопирован");
+  } catch (_error) {
+    showToast("Не удалось скопировать ключ");
+  }
+});
+
 subscriptionBtn.addEventListener("click", () => {
   const selected = currentTariff();
   showToast(`Оплата: ${selected.name} • ${selected.priceRub} ₽ • ${selected.duration}`);
@@ -724,7 +756,7 @@ autoServerBtn.addEventListener("click", () => {
   });
 
   if (bestPing === Number.POSITIVE_INFINITY) {
-    showToast("Сначала получите бесплатный ключ на 2 часа");
+    showToast("Сначала получите бесплатный WireGuard-профиль на 2 часа");
     watchAdBtn.click();
     return;
   }
