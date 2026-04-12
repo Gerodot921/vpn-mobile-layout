@@ -220,7 +220,7 @@ function renderServerList() {
     item.addEventListener("click", () => {
       if (locked && !canAccessServer(server)) {
         if (server.access === "free") {
-          showToast("Сначала посмотрите рекламу и получите ключ на 2 часа");
+          showToast("Сначала посмотрите рекламу и получите ключ на 1 час");
           watchAdBtn.click();
         } else {
           showToast("Для этого сервера нужна подписка");
@@ -399,7 +399,7 @@ function syncFreeAccessPanel() {
     freeAccessValue.classList.remove("copyable");
     freeAccessValue.disabled = true;
     freeAccessValue.title = "";
-    rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите профиль WireGuard на 2 часа.";
+    rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите профиль WireGuard на 1 час.";
     rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения профиля.";
     watchAdBtn.classList.remove("hidden");
     claimAccessBtn.classList.add("hidden");
@@ -416,7 +416,7 @@ function openRewardAd() {
     window.open(REWARD_AD_URL, "_blank", "noopener,noreferrer");
   }
 
-  showToast("Реклама открыта. После просмотра получите профиль на 2 часа.");
+  showToast("Реклама открыта. После просмотра получите профиль на 1 час.");
 }
 
 
@@ -593,7 +593,7 @@ function openConfigInAmnezia() {
   const active = currentServer();
   if (!canAccessServer(active)) {
     if (active.access === "free") {
-      showToast("Сначала получите бесплатный WireGuard-профиль на 2 часа");
+      showToast("Сначала получите бесплатный WireGuard-профиль на 1 час");
       watchAdBtn.click();
     } else {
       showToast("Для этого сервера нужна подписка");
@@ -756,7 +756,7 @@ autoServerBtn.addEventListener("click", () => {
   });
 
   if (bestPing === Number.POSITIVE_INFINITY) {
-    showToast("Сначала получите бесплатный WireGuard-профиль на 2 часа");
+    showToast("Сначала получите бесплатный WireGuard-профиль на 1 час");
     watchAdBtn.click();
     return;
   }

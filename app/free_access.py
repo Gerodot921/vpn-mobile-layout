@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -7,10 +10,11 @@ from threading import Lock
 from typing import TypedDict
 
 from app.json_storage import load_json_file, save_json_file
-from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename
+from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_profile, remove_peer_from_server
 
 FREE_ACCESS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "free_access.json"
-DEFAULT_FREE_ACCESS_HOURS = 2
+DEFAULT_FREE_ACCESS_HOURS = 1
+FREE_ACCESS_CLEANUP_INTERVAL_SECONDS = 60
 
 _state_lock = Lock()
 
@@ -95,6 +99,24 @@ def _user_key(user_id: int) -> str:
     return str(user_id)
 
 
+def _configured_free_access_hours() -> int:
+    raw_value = os.getenv("FREE_ACCESS_HOURS", str(DEFAULT_FREE_ACCESS_HOURS)).strip()
+    try:
+        hours = int(raw_value)
+    except Exception:
+        hours = DEFAULT_FREE_ACCESS_HOURS
+    return min(max(hours, 1), 168)
+
+
+def _configured_cleanup_interval_seconds() -> int:
+    raw_value = os.getenv("FREE_ACCESS_CLEANUP_INTERVAL_SECONDS", str(FREE_ACCESS_CLEANUP_INTERVAL_SECONDS)).strip()
+    try:
+        seconds = int(raw_value)
+    except Exception:
+        seconds = FREE_ACCESS_CLEANUP_INTERVAL_SECONDS
+    return min(max(seconds, 10), 3600)
+
+
 def get_free_access_record(user_id: int) -> FreeAccessRecord | None:
     with _state_lock:
         state = _load_state()
@@ -145,10 +167,11 @@ def format_free_access_remaining_text(user_id: int) -> str:
 
 def grant_free_access(
     user_id: int,
-    hours: int = DEFAULT_FREE_ACCESS_HOURS,
+    hours: int | None = None,
     source: str = "mini_app_ad",
     force_extend: bool = False,
 ) -> tuple[FreeAccessRecord, bool]:
+    effective_hours = _configured_free_access_hours() if hours is None else max(hours, 1)
     user_key = _user_key(user_id)
     with _state_lock:
         state = _load_state()
@@ -170,7 +193,7 @@ def grant_free_access(
         new_record: FreeAccessRecord = {
             "access_key": profile["profile_id"],
             "granted_at": now.isoformat(),
-            "expires_at": (base_expires_at + timedelta(hours=hours)).isoformat(),
+            "expires_at": (base_expires_at + timedelta(hours=effective_hours)).isoformat(),
             "claims_count": (current.get("claims_count", 0) if current else 0) + 1,
             "source": source,
             "vpn_protocol": "WireGuard",
@@ -181,3 +204,48 @@ def grant_free_access(
         state[user_key] = new_record
         _save_state(state)
         return new_record, True
+
+
+def revoke_expired_free_access() -> int:
+    now = _now_utc()
+    with _state_lock:
+        state = _load_state()
+        expired_user_ids: list[int] = []
+
+        for user_key, record in list(state.items()):
+            try:
+                if _parse_dt(record["expires_at"]) > now:
+                    continue
+                user_id = int(user_key)
+            except Exception:
+                continue
+
+            expired_user_ids.append(user_id)
+            del state[user_key]
+
+        if expired_user_ids:
+            _save_state(state)
+
+    revoked_count = 0
+    for user_id in expired_user_ids:
+        profile = get_wireguard_profile(user_id)
+        if profile is None:
+            continue
+        if remove_peer_from_server(profile.get("public_key", ""), user_id):
+            revoked_count += 1
+
+    return revoked_count
+
+
+async def free_access_cleanup_loop() -> None:
+    while True:
+        try:
+            revoked = revoke_expired_free_access()
+            if revoked > 0:
+                logging.info("Revoked expired free access peers: %s", revoked)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("Free access cleanup loop failed")
+
+        await asyncio.sleep(_configured_cleanup_interval_seconds())

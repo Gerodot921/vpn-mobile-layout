@@ -14,6 +14,7 @@ from aiogram import Bot
 from aiogram.types import BufferedInputFile
 
 from app.free_access import (
+    DEFAULT_FREE_ACCESS_HOURS,
     format_free_access_remaining_text,
     grant_free_access,
     get_free_access_record,
@@ -157,11 +158,11 @@ async def claim_free_access(request: web.Request) -> web.Response:
         if is_free_access_active(user_id):
             record = get_free_access_record(user_id)
             if record is None:
-                record, _ = grant_free_access(user_id, 2, source="mini_app_ad", force_extend=False)
+                record, _ = grant_free_access(user_id, DEFAULT_FREE_ACCESS_HOURS, source="mini_app_ad", force_extend=False)
             created = False
             action_label = record["source"] if record else "mini_app_ad"
         else:
-            record, created = grant_free_access(user_id, 2, source="mini_app_ad", force_extend=False)
+            record, created = grant_free_access(user_id, DEFAULT_FREE_ACCESS_HOURS, source="mini_app_ad", force_extend=False)
             action_label = "mini_app_ad"
 
         response_payload = _build_state_payload(user_data)
