@@ -18,7 +18,7 @@ from app.json_storage import load_json_file, save_json_file
 
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
 
-DEFAULT_ALLOWED_IPS = "0.0.0.0/0, ::/0"
+DEFAULT_ALLOWED_IPS = "0.0.0.0/0"
 DEFAULT_DNS = "1.1.1.1, 8.8.8.8"
 DEFAULT_ENDPOINT_PORT = 51820
 DEFAULT_CLIENT_NETWORK_PREFIX = "10.66.66"
