@@ -133,6 +133,7 @@ def grant_free_access(
     user_id: int,
     hours: int = DEFAULT_FREE_ACCESS_HOURS,
     source: str = "mini_app_ad",
+    force_extend: bool = False,
 ) -> tuple[FreeAccessRecord, bool]:
     user_key = _user_key(user_id)
     with _state_lock:
@@ -142,15 +143,19 @@ def grant_free_access(
 
         if current is not None:
             try:
-                if _parse_dt(current["expires_at"]) > now:
+                current_expires_at = _parse_dt(current["expires_at"])
+                if current_expires_at > now and not force_extend:
                     return current, False
+                base_expires_at = current_expires_at if current_expires_at > now else now
             except Exception:
-                pass
+                base_expires_at = now
+        else:
+            base_expires_at = now
 
         new_record: FreeAccessRecord = {
             "access_key": _new_key(),
             "granted_at": now.isoformat(),
-            "expires_at": (now + timedelta(hours=hours)).isoformat(),
+            "expires_at": (base_expires_at + timedelta(hours=hours)).isoformat(),
             "claims_count": (current.get("claims_count", 0) if current else 0) + 1,
             "source": source,
         }

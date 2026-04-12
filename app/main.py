@@ -4,8 +4,10 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import MenuButtonWebApp, WebAppInfo
+from aiohttp import web
 from dotenv import load_dotenv
 
+from app.api import create_api_app
 from app.handlers import callbacks_router, commands_router, menu_router, start_router, webapp_router
 from app.subscriptions import reminder_loop
 
@@ -35,6 +37,15 @@ async def main() -> None:
 
     bot = Bot(token=token)
 
+    api_app = create_api_app(bot)
+    api_runner = web.AppRunner(api_app)
+    await api_runner.setup()
+    api_host = os.getenv("MINI_APP_API_HOST", "0.0.0.0")
+    api_port = int(os.getenv("MINI_APP_API_PORT", "8081"))
+    api_site = web.TCPSite(api_runner, host=api_host, port=api_port)
+    await api_site.start()
+    logging.info("Mini App API server started on %s:%s", api_host, api_port)
+
     mini_app_url = os.getenv("TELEGRAM_MINI_APP_URL", "").strip()
     if mini_app_url.startswith("https://"):
         await bot.set_chat_menu_button(
@@ -57,6 +68,7 @@ async def main() -> None:
             await reminder_task
         except asyncio.CancelledError:
             pass
+        await api_runner.cleanup()
 
 
 def run() -> None:

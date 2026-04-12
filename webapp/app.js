@@ -17,6 +17,7 @@ const rewardTimer = document.getElementById("rewardTimer");
 const watchAdBtn = document.getElementById("watchAdBtn");
 const claimAccessBtn = document.getElementById("claimAccessBtn");
 const refLinkInput = document.getElementById("refLink");
+const referralStats = document.getElementById("referralStats");
 const userLine = document.getElementById("userLine");
 const copyRefBtn = document.getElementById("copyRefBtn");
 const timeLeftValue = document.getElementById("timeLeftValue");
@@ -35,8 +36,6 @@ const onboardingBtn = document.getElementById("onboardingBtn");
 const INSTALL_AMNEZIA_URL = "https://amnezia.org/ru/downloads";
 const REWARD_AD_URL = "";
 const REWARD_WATCH_SECONDS = 20;
-const FREE_ACCESS_DURATION_MS = 2 * 60 * 60 * 1000;
-const FREE_ACCESS_STORAGE_KEY = "skull_vpn_free_access_until_v1";
 const REWARD_READY_STORAGE_KEY = "skull_vpn_reward_ready_at_v1";
 const ONBOARDING_KEY = "skull_vpn_onboarding_seen_v2";
 
@@ -90,8 +89,15 @@ const state = {
   tariffIndex: 0,
   hasSubscription: false,
   freeAccessUntil: 0,
+  freeAccessSource: null,
+  freeAccessKey: null,
   rewardReadyAt: 0,
-  rewardClaimSent: false,
+  referral: {
+    referrerId: null,
+    invitedCount: 0,
+    bonusDays: 0,
+    activated: false,
+  },
 };
 
 const tariffPlans = [
@@ -324,22 +330,18 @@ function syncSubscription() {
 }
 
 
-function loadRewardState() {
+function loadRewardTimerState() {
   try {
-    const storedUntil = Number(localStorage.getItem(FREE_ACCESS_STORAGE_KEY) || "0");
     const storedReadyAt = Number(localStorage.getItem(REWARD_READY_STORAGE_KEY) || "0");
-    state.freeAccessUntil = Number.isFinite(storedUntil) ? storedUntil : 0;
     state.rewardReadyAt = Number.isFinite(storedReadyAt) ? storedReadyAt : 0;
   } catch (_error) {
-    state.freeAccessUntil = 0;
     state.rewardReadyAt = 0;
   }
 }
 
 
-function saveRewardState() {
+function saveRewardTimerState() {
   try {
-    localStorage.setItem(FREE_ACCESS_STORAGE_KEY, String(state.freeAccessUntil));
     localStorage.setItem(REWARD_READY_STORAGE_KEY, String(state.rewardReadyAt));
   } catch (_error) {
     // ignored
@@ -354,32 +356,41 @@ function syncFreeAccessPanel() {
 
   if (accessRemaining > 0) {
     freeAccessValue.textContent = `🔑 ${formatDurationShort(accessRemaining)}`;
-    rewardStatus.textContent = "Ключ активен. Выберите бесплатный сервер и подключайтесь.";
+    if (state.freeAccessSource === "referral") {
+      rewardStatus.textContent = "Вы пришли по приглашению. Реклама не нужна.";
+    } else {
+      rewardStatus.textContent = "Ключ активен. Выберите бесплатный сервер и подключайтесь.";
+    }
     rewardTimer.textContent = `Доступ действует ещё ${formatDurationShort(accessRemaining)}.`;
-    state.rewardClaimSent = true;
+    watchAdBtn.classList.add("hidden");
+    claimAccessBtn.classList.add("hidden");
+  } else if (rewardRemaining > 0) {
+    freeAccessValue.textContent = "🔒 Не активирован";
+    rewardStatus.textContent = "Реклама просмотрена. Заберите ключ после таймера.";
+    rewardTimer.textContent = `Можно получить ключ через ${formatDurationShort(rewardRemaining)}.`;
+    watchAdBtn.classList.add("hidden");
+    claimAccessBtn.classList.remove("hidden");
+    claimAccessBtn.disabled = true;
+  } else if (state.rewardReadyAt > 0) {
+    freeAccessValue.textContent = "🔒 Не активирован";
+    rewardStatus.textContent = "Реклама просмотрена. Ключ можно забрать.";
+    rewardTimer.textContent = "Нажмите кнопку получения ключа.";
+    watchAdBtn.classList.add("hidden");
+    claimAccessBtn.classList.remove("hidden");
+    claimAccessBtn.disabled = false;
   } else {
     freeAccessValue.textContent = "🔒 Не активирован";
     rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите ключ на 2 часа.";
-    if (rewardRemaining <= 0) {
-      state.rewardClaimSent = false;
-    }
-    if (rewardRemaining > 0) {
-      rewardTimer.textContent = `Реклама просмотрена. Через ${formatDurationShort(rewardRemaining)} можно получить ключ.`;
-    } else if (state.rewardClaimSent) {
-      rewardTimer.textContent = "Ключ уже отправлен в чат Telegram.";
-    } else {
-      rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения ключа.";
-    }
+    rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения ключа.";
+    watchAdBtn.classList.remove("hidden");
+    claimAccessBtn.classList.add("hidden");
   }
-
-  claimAccessBtn.disabled = !(rewardRemaining <= 0 && !state.rewardClaimSent);
 }
 
 
 function openRewardAd() {
-  state.rewardClaimSent = false;
   state.rewardReadyAt = Date.now() + REWARD_WATCH_SECONDS * 1000;
-  saveRewardState();
+  saveRewardTimerState();
   syncFreeAccessPanel();
 
   if (REWARD_AD_URL) {
@@ -397,24 +408,92 @@ function claimFreeAccess() {
     return;
   }
 
-  const payload = {
-    action: "claim_free_access",
-    hours: 2,
-    source: "mini_app_ad",
-  };
-
-  state.rewardClaimSent = true;
-  state.freeAccessUntil = Date.now() + FREE_ACCESS_DURATION_MS;
-  saveRewardState();
-  syncFreeAccessPanel();
-
-  if (tg?.sendData) {
-    tg.sendData(JSON.stringify(payload));
-    showToast("Ключ отправлен в чат с ботом");
+  if (!tg?.initData) {
+    showToast("Откройте Mini App внутри Telegram");
     return;
   }
 
-  showToast("Mini App открыт не в Telegram — отправка ключа недоступна");
+  claimAccessBtn.disabled = true;
+
+  fetch("/api/claim-free-access", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ initData: tg.initData }),
+  })
+    .then(async (response) => {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "Не удалось получить доступ");
+      }
+      applyUserState(data);
+      showToast("Бесплатный доступ активирован");
+    })
+    .catch((error) => {
+      claimAccessBtn.disabled = false;
+      showToast(error.message || "Не удалось получить доступ");
+    });
+}
+
+
+function updateReferralStats() {
+  const invitedCount = state.referral?.invitedCount || 0;
+  const bonusDays = state.referral?.bonusDays || 0;
+  referralStats.textContent = `👥 Приглашено: ${invitedCount} • 🎁 Дней: ${bonusDays}`;
+}
+
+
+function applyUserState(payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+
+  const referral = payload.referral || {};
+  state.referral = {
+    referrerId: referral.referrer_id ?? null,
+    invitedCount: Number(referral.invited_count || 0),
+    bonusDays: Number(referral.bonus_days || 0),
+    activated: Boolean(referral.activated),
+  };
+
+  const freeAccess = payload.free_access || {};
+  state.freeAccessUntil = freeAccess.expires_at ? Date.parse(freeAccess.expires_at) || 0 : 0;
+  state.freeAccessSource = freeAccess.source || null;
+  state.freeAccessKey = freeAccess.access_key || null;
+
+  updateReferralStats();
+  syncFreeAccessPanel();
+  renderServerList();
+}
+
+
+async function loadUserState() {
+  if (!tg?.initData) {
+    updateReferralStats();
+    syncFreeAccessPanel();
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/user-state", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ initData: tg.initData }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || "Не удалось загрузить состояние пользователя");
+    }
+
+    applyUserState(data);
+  } catch (_error) {
+    updateReferralStats();
+    syncFreeAccessPanel();
+  }
 }
 
 function currentTariff() {
@@ -693,7 +772,7 @@ function showOnboardingIfNeeded() {
 }
 
 bootstrapFromTelegram();
-loadRewardState();
+loadRewardTimerState();
 updateServerView();
 renderServerList();
 syncSubscription();
@@ -702,4 +781,5 @@ renderTariffList();
 renderByMode();
 showOnboardingIfNeeded();
 initializeBaselineIp();
+loadUserState();
 window.setInterval(syncFreeAccessPanel, 1000);

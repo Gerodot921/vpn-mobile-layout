@@ -5,7 +5,7 @@ from threading import Lock
 from typing import TypedDict
 
 from app.json_storage import load_json_file, save_json_file
-from app.subscriptions import extend_subscription
+from app.free_access import grant_free_access
 
 REFERRALS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "referrals.json"
 
@@ -175,6 +175,6 @@ def activate_user_and_apply_bonus(user_id: int) -> int | None:
         state[referrer_key] = referrer
         _save_state(state)
 
-    extend_subscription(referrer_id, 3)
-    extend_subscription(user_id, 1)
+    grant_free_access(referrer_id, 24, source="referral_bonus", force_extend=True)
+    grant_free_access(user_id, 48, source="referral", force_extend=True)
     return referrer_id
