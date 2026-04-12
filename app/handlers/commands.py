@@ -16,7 +16,7 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, reset_wireguard_profile
 
 router = Router()
 
@@ -134,4 +134,15 @@ async def send_wireguard_profile(message: Message) -> None:
 
 @router.message(F.text.in_({"profile", "Profile", "профиль", "конфиг", "config"}))
 async def send_wireguard_profile_text_alias(message: Message) -> None:
+    await send_wireguard_profile(message)
+
+
+@router.message(Command(commands=["profile_reset", "wg_reset"]))
+async def reset_and_send_wireguard_profile(message: Message) -> None:
+    if not message.from_user:
+        return
+
+    user_id = message.from_user.id
+    reset_wireguard_profile(user_id)
+    await message.answer("Профиль сброшен. Отправляю новый .conf")
     await send_wireguard_profile(message)

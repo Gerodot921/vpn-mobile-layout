@@ -435,6 +435,31 @@ def _docker_executable() -> str | None:
     return None
 
 
+def _docker_container_and_iface() -> tuple[str | None, str | None, str | None]:
+    docker_container = os.getenv("WIREGUARD_DOCKER_CONTAINER", "").strip() or None
+    interface_name = os.getenv("WIREGUARD_INTERFACE_NAME", "wg0").strip() or None
+    docker_bin = _docker_executable()
+    return docker_bin, docker_container, interface_name
+
+
+def _run_docker_cmd(cmd: list[str], *, user_id: int, action: str) -> bool:
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=10, text=True)
+        if result.returncode == 0:
+            return True
+        logging.error("Failed to %s for user_id=%s: %s", action, user_id, result.stderr)
+        return False
+    except FileNotFoundError:
+        logging.error("Docker command not found")
+        return False
+    except subprocess.TimeoutExpired:
+        logging.error("Docker exec timeout while trying to %s for user_id=%s", action, user_id)
+        return False
+    except Exception as exc:
+        logging.error("Docker exec error while trying to %s for user_id=%s: %s", action, user_id, exc)
+        return False
+
+
 def add_peer_to_server(user_id: int) -> bool:
     """Add a WireGuard peer to the server via docker exec when profile is granted."""
     profile = get_wireguard_profile(user_id)
@@ -442,9 +467,7 @@ def add_peer_to_server(user_id: int) -> bool:
         logging.warning("No WireGuard profile found for user_id=%s", user_id)
         return False
 
-    docker_container = os.getenv("WIREGUARD_DOCKER_CONTAINER", "").strip()
-    interface_name = os.getenv("WIREGUARD_INTERFACE_NAME", "wg0").strip()
-    docker_bin = _docker_executable()
+    docker_bin, docker_container, interface_name = _docker_container_and_iface()
 
     if not docker_container:
         logging.warning("WireGuard Docker container is not configured for user_id=%s", user_id)
@@ -492,20 +515,49 @@ def add_peer_to_server(user_id: int) -> bool:
             client_address,
         ]
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, timeout=10, text=True)
-        if result.returncode == 0:
-            logging.info("Added peer for user_id=%s to %s in %s", user_id, interface_name, docker_container)
-            return True
+    ok = _run_docker_cmd(cmd, user_id=user_id, action="add peer")
+    if ok:
+        logging.info("Added peer for user_id=%s to %s in %s", user_id, interface_name, docker_container)
+    return ok
 
-        logging.error("Failed to add peer for user_id=%s: %s", user_id, result.stderr)
+
+def remove_peer_from_server(public_key: str, user_id: int) -> bool:
+    if not public_key:
         return False
-    except FileNotFoundError:
-        logging.error("Docker command not found")
+
+    docker_bin, docker_container, interface_name = _docker_container_and_iface()
+    if not docker_container:
         return False
-    except subprocess.TimeoutExpired:
-        logging.error("Docker exec timeout for user_id=%s", user_id)
+    if not docker_bin:
         return False
-    except Exception as exc:
-        logging.error("Docker exec error for user_id=%s: %s", user_id, exc)
-        return False
+
+    cmd = [
+        docker_bin,
+        "exec",
+        docker_container,
+        "wg",
+        "set",
+        interface_name,
+        "peer",
+        public_key,
+        "remove",
+    ]
+
+    ok = _run_docker_cmd(cmd, user_id=user_id, action="remove peer")
+    if ok:
+        logging.info("Removed peer for user_id=%s from %s in %s", user_id, interface_name, docker_container)
+    return ok
+
+
+def reset_wireguard_profile(user_id: int) -> WireGuardProfile:
+    user_key = _user_key(user_id)
+    with _state_lock:
+        state = _load_state()
+        old_profile = state["profiles"].get(user_key)
+        if old_profile is not None:
+            remove_peer_from_server(old_profile.get("public_key", ""), user_id)
+
+        profile = _build_profile(user_id, state)
+        state["profiles"][user_key] = profile
+        _save_state(state)
+        return profile
