@@ -216,14 +216,55 @@ def _build_address(client_octet: int) -> str:
     return f"{_configured_client_prefix()}.{client_octet}/32"
 
 
+def _extract_client_octet(address: str) -> int | None:
+    try:
+        host = address.split("/", 1)[0]
+        octet = int(host.rsplit(".", 1)[1])
+    except Exception:
+        return None
+
+    return octet if 1 <= octet <= 254 else None
+
+
+def _used_octets(state: WireGuardState, prefix: str) -> set[int]:
+    used: set[int] = set()
+    for profile in state.get("profiles", {}).values():
+        if not isinstance(profile, dict):
+            continue
+        address = profile.get("address")
+        if not isinstance(address, str):
+            continue
+        if not address.startswith(f"{prefix}."):
+            continue
+        octet = _extract_client_octet(address)
+        if octet is not None:
+            used.add(octet)
+    return used
+
+
 def _next_client_octet(state: WireGuardState) -> int:
+    start_octet = _configured_start_octet()
+    prefix = _configured_client_prefix()
+    used_octets = _used_octets(state, prefix)
+
     next_octet = state.get("next_client_octet", DEFAULT_CLIENT_START_OCTET)
-    if not isinstance(next_octet, int) or next_octet < DEFAULT_CLIENT_START_OCTET:
-        next_octet = _configured_start_octet()
+    if not isinstance(next_octet, int) or next_octet < start_octet:
+        next_octet = start_octet
     if next_octet > 254:
-        next_octet = _configured_start_octet()
-    state["next_client_octet"] = next_octet + 1
-    return next_octet
+        next_octet = start_octet
+
+    candidate = next_octet
+    for _ in range(start_octet, 255):
+        if candidate not in used_octets:
+            state["next_client_octet"] = candidate + 1
+            return candidate
+        candidate += 1
+        if candidate > 254:
+            candidate = start_octet
+
+    # Fallback if range is exhausted.
+    state["next_client_octet"] = start_octet
+    return start_octet
 
 
 def _profile_id() -> str:
@@ -312,6 +353,12 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
             state["profiles"][user_key] = profile
             _save_state(state)
             return profile
+
+        # Migrate legacy low-octet addresses to configured range (e.g. from .2 to .100+).
+        current_octet = _extract_client_octet(profile.get("address", ""))
+        start_octet = _configured_start_octet()
+        if current_octet is None or current_octet < start_octet:
+            profile["address"] = _build_address(_next_client_octet(state))
 
         profile["endpoint"] = _server_endpoint()
         profile["dns"] = _configured_dns()
