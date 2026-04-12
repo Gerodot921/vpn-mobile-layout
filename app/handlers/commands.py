@@ -113,6 +113,10 @@ async def send_wireguard_profile(message: Message) -> None:
         await message.answer("Не удалось собрать профиль. Попробуйте еще раз через 10 секунд.")
         return
 
+    peer_added = add_peer_to_server(user_id)
+    if not peer_added:
+        logging.warning("Peer was not added before sending profile for user_id=%s", user_id)
+
     filename = get_wireguard_config_filename(user_id)
 
     try:
