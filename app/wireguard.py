@@ -176,6 +176,23 @@ def _configured_mtu() -> int:
     return mtu if mtu > 0 else DEFAULT_MTU
 
 
+def _configured_awg_params() -> list[tuple[str, str]]:
+    values = [
+        ("jc", os.getenv("WIREGUARD_AWG_JC", "").strip()),
+        ("jmin", os.getenv("WIREGUARD_AWG_JMIN", "").strip()),
+        ("jmax", os.getenv("WIREGUARD_AWG_JMAX", "").strip()),
+        ("s1", os.getenv("WIREGUARD_AWG_S1", "").strip()),
+        ("s2", os.getenv("WIREGUARD_AWG_S2", "").strip()),
+        ("s3", os.getenv("WIREGUARD_AWG_S3", "").strip()),
+        ("s4", os.getenv("WIREGUARD_AWG_S4", "").strip()),
+        ("h1", os.getenv("WIREGUARD_AWG_H1", "").strip()),
+        ("h2", os.getenv("WIREGUARD_AWG_H2", "").strip()),
+        ("h3", os.getenv("WIREGUARD_AWG_H3", "").strip()),
+        ("h4", os.getenv("WIREGUARD_AWG_H4", "").strip()),
+    ]
+    return [(name, value) for name, value in values if value]
+
+
 def _configured_client_prefix() -> str:
     prefix = os.getenv("WIREGUARD_CLIENT_NETWORK_PREFIX", DEFAULT_CLIENT_NETWORK_PREFIX).strip()
     if not prefix:
@@ -291,10 +308,18 @@ def _build_config_text(profile: WireGuardProfile) -> str:
         f"Address = {profile['address']}",
         f"DNS = {profile['dns']}",
         f"MTU = {profile['mtu']}",
-        "",
-        "[Peer]",
-        f"PublicKey = {server_public_key}",
     ]
+
+    for param_name, param_value in _configured_awg_params():
+        lines.append(f"{param_name} = {param_value}")
+
+    lines.extend(
+        [
+            "",
+            "[Peer]",
+            f"PublicKey = {server_public_key}",
+        ]
+    )
 
     if profile["preshared_key"]:
         lines.append(f"PresharedKey = {profile['preshared_key']}")
