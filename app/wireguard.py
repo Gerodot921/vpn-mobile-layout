@@ -178,17 +178,17 @@ def _configured_mtu() -> int:
 
 def _configured_awg_params() -> list[tuple[str, str]]:
     values = [
-        ("jc", os.getenv("WIREGUARD_AWG_JC", "").strip()),
-        ("jmin", os.getenv("WIREGUARD_AWG_JMIN", "").strip()),
-        ("jmax", os.getenv("WIREGUARD_AWG_JMAX", "").strip()),
-        ("s1", os.getenv("WIREGUARD_AWG_S1", "").strip()),
-        ("s2", os.getenv("WIREGUARD_AWG_S2", "").strip()),
-        ("s3", os.getenv("WIREGUARD_AWG_S3", "").strip()),
-        ("s4", os.getenv("WIREGUARD_AWG_S4", "").strip()),
-        ("h1", os.getenv("WIREGUARD_AWG_H1", "").strip()),
-        ("h2", os.getenv("WIREGUARD_AWG_H2", "").strip()),
-        ("h3", os.getenv("WIREGUARD_AWG_H3", "").strip()),
-        ("h4", os.getenv("WIREGUARD_AWG_H4", "").strip()),
+        ("Jc", os.getenv("WIREGUARD_AWG_JC", "").strip()),
+        ("Jmin", os.getenv("WIREGUARD_AWG_JMIN", "").strip()),
+        ("Jmax", os.getenv("WIREGUARD_AWG_JMAX", "").strip()),
+        ("S1", os.getenv("WIREGUARD_AWG_S1", "").strip()),
+        ("S2", os.getenv("WIREGUARD_AWG_S2", "").strip()),
+        ("S3", os.getenv("WIREGUARD_AWG_S3", "").strip()),
+        ("S4", os.getenv("WIREGUARD_AWG_S4", "").strip()),
+        ("H1", os.getenv("WIREGUARD_AWG_H1", "").strip()),
+        ("H2", os.getenv("WIREGUARD_AWG_H2", "").strip()),
+        ("H3", os.getenv("WIREGUARD_AWG_H3", "").strip()),
+        ("H4", os.getenv("WIREGUARD_AWG_H4", "").strip()),
     ]
     return [(name, value) for name, value in values if value]
 
