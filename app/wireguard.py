@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 import subprocess
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -394,6 +395,21 @@ def get_wireguard_config_filename(user_id: int) -> str:
     return profile["config_filename"]
 
 
+def _docker_executable() -> str | None:
+    configured = os.getenv("WIREGUARD_DOCKER_BIN", "").strip()
+    if configured:
+        if Path(configured).exists():
+            return configured
+        logging.error("Configured WIREGUARD_DOCKER_BIN not found: %s", configured)
+
+    for candidate in ("docker", "/usr/bin/docker", "/usr/local/bin/docker", "/bin/docker"):
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+
+    return None
+
+
 def add_peer_to_server(user_id: int) -> bool:
     """Add a WireGuard peer to the server via docker exec when profile is granted."""
     profile = get_wireguard_profile(user_id)
@@ -403,9 +419,14 @@ def add_peer_to_server(user_id: int) -> bool:
 
     docker_container = os.getenv("WIREGUARD_DOCKER_CONTAINER", "").strip()
     interface_name = os.getenv("WIREGUARD_INTERFACE_NAME", "wg0").strip()
+    docker_bin = _docker_executable()
 
     if not docker_container:
         logging.warning("WireGuard Docker container is not configured for user_id=%s", user_id)
+        return False
+
+    if not docker_bin:
+        logging.error("Docker executable was not found. Set WIREGUARD_DOCKER_BIN=/usr/bin/docker")
         return False
 
     client_public_key = profile["public_key"]
@@ -414,7 +435,7 @@ def add_peer_to_server(user_id: int) -> bool:
 
     if client_preshared_key:
         cmd = [
-            "docker",
+            docker_bin,
             "exec",
             "-e",
             f"WG_PUBLIC_KEY={client_public_key}",
@@ -434,7 +455,7 @@ def add_peer_to_server(user_id: int) -> bool:
         ]
     else:
         cmd = [
-            "docker",
+            docker_bin,
             "exec",
             docker_container,
             "wg",
