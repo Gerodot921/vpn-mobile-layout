@@ -96,6 +96,10 @@ body {
   animation: fadeUp 0.55s ease;
 }
 
+.reward-panel {
+  border-color: rgba(0, 211, 167, 0.22);
+}
+
 .panel h2 {
   margin: 0 0 10px;
   font-size: 16px;
@@ -195,6 +199,12 @@ body {
 
 .btn:active {
   transform: translateY(1px) scale(0.995);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .btn.primary {
@@ -303,6 +313,13 @@ body {
   filter: grayscale(1);
 }
 
+.server-item.locked .meta-lock {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .server-item.locked .meta-badge {
   border-color: rgba(149, 170, 199, 0.35);
 }
@@ -362,6 +379,10 @@ body {
 .value-inline {
   font-size: 14px;
   font-weight: 700;
+}
+
+.reward-actions {
+  margin-top: 6px;
 }
 
 .warning {

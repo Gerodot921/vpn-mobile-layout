@@ -13,6 +13,7 @@ from app.keyboards.inline import (
 )
 from app.referrals import ensure_user
 from app.texts import (
+    FREE_ACCESS_PANEL_TEXT,
     HELP_TEXT,
     ISSUE_STEP_ONE_TEXT,
     MENU_CONNECT_TEXT,
@@ -32,6 +33,14 @@ def _mini_app_text_with_fallback() -> str:
             f"Если кнопка не сработала, откройте ссылку вручную:\n{url}"
         )
     return MINI_APP_ENTRY_TEXT
+
+
+async def _open_mini_app(message: Message) -> None:
+    await message.answer(
+        f"{FREE_ACCESS_PANEL_TEXT}\n\n{_mini_app_text_with_fallback()}",
+        reply_markup=mini_app_only_keyboard(),
+        disable_web_page_preview=True,
+    )
 
 
 @router.message(F.text == "🚀 Подключиться")
@@ -78,8 +87,9 @@ async def help_menu(message: Message) -> None:
 
 @router.message(F.text == "📱 Mini App")
 async def mini_app_menu(message: Message) -> None:
-    await message.answer(
-        _mini_app_text_with_fallback(),
-        reply_markup=mini_app_only_keyboard(),
-        disable_web_page_preview=True,
-    )
+    await _open_mini_app(message)
+
+
+@router.message(F.text == "🎬 Бесплатный VPN")
+async def free_vpn_menu(message: Message) -> None:
+    await _open_mini_app(message)

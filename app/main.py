@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import MenuButtonWebApp, WebAppInfo
 from dotenv import load_dotenv
 
-from app.handlers import callbacks_router, commands_router, menu_router, start_router
+from app.handlers import callbacks_router, commands_router, menu_router, start_router, webapp_router
 from app.subscriptions import reminder_loop
 
 
@@ -16,6 +16,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(commands_router)
     dp.include_router(menu_router)
     dp.include_router(callbacks_router)
+    dp.include_router(webapp_router)
     return dp
 
 

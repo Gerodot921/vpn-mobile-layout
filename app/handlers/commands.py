@@ -10,6 +10,7 @@ from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.texts import (
+    FREE_ACCESS_PANEL_TEXT,
     MINI_APP_ENTRY_TEXT,
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
@@ -57,7 +58,16 @@ async def clear_chat(message: Message) -> None:
 @router.message(Command(commands=["miniapp"]))
 async def open_mini_app(message: Message) -> None:
     await message.answer(
-        _mini_app_text_with_fallback(),
+        f"{FREE_ACCESS_PANEL_TEXT}\n\n{_mini_app_text_with_fallback()}",
+        reply_markup=mini_app_only_keyboard(),
+        disable_web_page_preview=True,
+    )
+
+
+@router.message(Command(commands=["freevpn"]))
+async def open_free_vpn(message: Message) -> None:
+    await message.answer(
+        f"{FREE_ACCESS_PANEL_TEXT}\n\n{_mini_app_text_with_fallback()}",
         reply_markup=mini_app_only_keyboard(),
         disable_web_page_preview=True,
     )

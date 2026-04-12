@@ -11,6 +11,11 @@ const openAgainBtn = document.getElementById("openAgainBtn");
 const checkBtn = document.getElementById("checkBtn");
 const disconnectBtn = document.getElementById("disconnectBtn");
 const installBtn = document.getElementById("installBtn");
+const freeAccessValue = document.getElementById("freeAccessValue");
+const rewardStatus = document.getElementById("rewardStatus");
+const rewardTimer = document.getElementById("rewardTimer");
+const watchAdBtn = document.getElementById("watchAdBtn");
+const claimAccessBtn = document.getElementById("claimAccessBtn");
 const refLinkInput = document.getElementById("refLink");
 const userLine = document.getElementById("userLine");
 const copyRefBtn = document.getElementById("copyRefBtn");
@@ -28,6 +33,11 @@ const onboarding = document.getElementById("onboarding");
 const onboardingBtn = document.getElementById("onboardingBtn");
 
 const INSTALL_AMNEZIA_URL = "https://amnezia.org/ru/downloads";
+const REWARD_AD_URL = "";
+const REWARD_WATCH_SECONDS = 20;
+const FREE_ACCESS_DURATION_MS = 2 * 60 * 60 * 1000;
+const FREE_ACCESS_STORAGE_KEY = "skull_vpn_free_access_until_v1";
+const REWARD_READY_STORAGE_KEY = "skull_vpn_reward_ready_at_v1";
 const ONBOARDING_KEY = "skull_vpn_onboarding_seen_v2";
 
 const serverConfigs = [
@@ -74,11 +84,14 @@ const state = {
   serverIndex: 0,
   baselineIp: null,
   baselineCountry: null,
-  accessHours: 24,
+  accessHours: 0,
   connectedCountry: null,
   checkErrorHint: "",
   tariffIndex: 0,
   hasSubscription: false,
+  freeAccessUntil: 0,
+  rewardReadyAt: 0,
+  rewardClaimSent: false,
 };
 
 const tariffPlans = [
@@ -116,6 +129,14 @@ function currentServer() {
   return serverConfigs[state.serverIndex];
 }
 
+
+function canAccessServer(server) {
+  if (server.access === "free") {
+    return hasFreeAccess();
+  }
+  return hasPaidAccess();
+}
+
 function updateServerView() {
   const active = currentServer();
   serverValue.textContent = `${active.emoji} ${active.name}`;
@@ -123,6 +144,32 @@ function updateServerView() {
 
 function hasPaidAccess() {
   return state.hasSubscription;
+}
+
+
+function hasFreeAccess() {
+  return state.freeAccessUntil > Date.now();
+}
+
+
+function formatDurationShort(totalMs) {
+  const safeMs = Math.max(0, Math.floor(totalMs));
+  const totalSeconds = Math.floor(safeMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  if (hours > 0) {
+    if (minutes > 0) {
+      return `${hours} ч ${minutes} мин`;
+    }
+    return `${hours} ч`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes} мин`;
+  }
+
+  return "меньше минуты";
 }
 
 function statusClassByType(type) {
@@ -146,7 +193,7 @@ function renderServerList() {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "server-item";
-    if (index === state.serverIndex && (!locked || hasPaidAccess())) {
+    if (index === state.serverIndex && (!locked || canAccessServer(server))) {
       item.classList.add("active");
     }
     if (locked) {
@@ -156,6 +203,7 @@ function renderServerList() {
     item.innerHTML = `
       <div class="server-row">
         <span class="server-name">${server.emoji} ${server.name}</span>
+        ${locked ? `<span class="meta-lock">${server.access === "free" ? "🔒 После рекламы" : "🔒 Нужна подписка"}</span>` : ""}
       </div>
       <div class="server-meta">
         <span class="meta-badge ${statusClassByType(server.status)}">${server.statusText}</span>
@@ -164,9 +212,14 @@ function renderServerList() {
     `;
 
     item.addEventListener("click", () => {
-      if (locked && !hasPaidAccess()) {
-        showToast("Для этого сервера нужна подписка");
-        subscriptionBtn.click();
+      if (locked && !canAccessServer(server)) {
+        if (server.access === "free") {
+          showToast("Сначала посмотрите рекламу и получите ключ на 2 часа");
+          watchAdBtn.click();
+        } else {
+          showToast("Для этого сервера нужна подписка");
+          subscriptionBtn.click();
+        }
         return;
       }
 
@@ -185,7 +238,7 @@ function renderServerList() {
   };
 
   freeServers.forEach((server) => {
-    renderServerCard(server, serverConfigs.indexOf(server), serverList, false);
+    renderServerCard(server, serverConfigs.indexOf(server), serverList, !hasFreeAccess());
   });
 
   paidServers.forEach((server) => {
@@ -257,13 +310,111 @@ function renderByMode() {
 }
 
 function syncSubscription() {
-  timeLeftValue.textContent = `⏳ Доступ: ${state.accessHours} часа`;
+  if (state.accessHours > 0) {
+    timeLeftValue.textContent = `⏳ Подписка: ${state.accessHours} часа`;
+  } else {
+    timeLeftValue.textContent = "⏳ Подписка не активна";
+  }
   state.hasSubscription = state.accessHours > 0;
-  if (state.accessHours < 12) {
+  if (state.accessHours > 0 && state.accessHours < 12) {
     timeWarning.classList.remove("hidden");
   } else {
     timeWarning.classList.add("hidden");
   }
+}
+
+
+function loadRewardState() {
+  try {
+    const storedUntil = Number(localStorage.getItem(FREE_ACCESS_STORAGE_KEY) || "0");
+    const storedReadyAt = Number(localStorage.getItem(REWARD_READY_STORAGE_KEY) || "0");
+    state.freeAccessUntil = Number.isFinite(storedUntil) ? storedUntil : 0;
+    state.rewardReadyAt = Number.isFinite(storedReadyAt) ? storedReadyAt : 0;
+  } catch (_error) {
+    state.freeAccessUntil = 0;
+    state.rewardReadyAt = 0;
+  }
+}
+
+
+function saveRewardState() {
+  try {
+    localStorage.setItem(FREE_ACCESS_STORAGE_KEY, String(state.freeAccessUntil));
+    localStorage.setItem(REWARD_READY_STORAGE_KEY, String(state.rewardReadyAt));
+  } catch (_error) {
+    // ignored
+  }
+}
+
+
+function syncFreeAccessPanel() {
+  const now = Date.now();
+  const accessRemaining = state.freeAccessUntil - now;
+  const rewardRemaining = state.rewardReadyAt - now;
+
+  if (accessRemaining > 0) {
+    freeAccessValue.textContent = `🔑 ${formatDurationShort(accessRemaining)}`;
+    rewardStatus.textContent = "Ключ активен. Выберите бесплатный сервер и подключайтесь.";
+    rewardTimer.textContent = `Доступ действует ещё ${formatDurationShort(accessRemaining)}.`;
+    state.rewardClaimSent = true;
+  } else {
+    freeAccessValue.textContent = "🔒 Не активирован";
+    rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите ключ на 2 часа.";
+    if (rewardRemaining <= 0) {
+      state.rewardClaimSent = false;
+    }
+    if (rewardRemaining > 0) {
+      rewardTimer.textContent = `Реклама просмотрена. Через ${formatDurationShort(rewardRemaining)} можно получить ключ.`;
+    } else if (state.rewardClaimSent) {
+      rewardTimer.textContent = "Ключ уже отправлен в чат Telegram.";
+    } else {
+      rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения ключа.";
+    }
+  }
+
+  claimAccessBtn.disabled = !(rewardRemaining <= 0 && !state.rewardClaimSent);
+}
+
+
+function openRewardAd() {
+  state.rewardClaimSent = false;
+  state.rewardReadyAt = Date.now() + REWARD_WATCH_SECONDS * 1000;
+  saveRewardState();
+  syncFreeAccessPanel();
+
+  if (REWARD_AD_URL) {
+    window.open(REWARD_AD_URL, "_blank", "noopener,noreferrer");
+  }
+
+  showToast("Реклама открыта. После просмотра получите ключ на 2 часа.");
+}
+
+
+function claimFreeAccess() {
+  const now = Date.now();
+  if (state.rewardReadyAt > now) {
+    showToast("Сначала досмотрите рекламу");
+    return;
+  }
+
+  const payload = {
+    action: "claim_free_access",
+    hours: 2,
+    source: "mini_app_ad",
+  };
+
+  state.rewardClaimSent = true;
+  state.freeAccessUntil = Date.now() + FREE_ACCESS_DURATION_MS;
+  saveRewardState();
+  syncFreeAccessPanel();
+
+  if (tg?.sendData) {
+    tg.sendData(JSON.stringify(payload));
+    showToast("Ключ отправлен в чат с ботом");
+    return;
+  }
+
+  showToast("Mini App открыт не в Telegram — отправка ключа недоступна");
 }
 
 function currentTariff() {
@@ -342,6 +493,16 @@ function showToast(text) {
 
 function openConfigInAmnezia() {
   const active = currentServer();
+  if (!canAccessServer(active)) {
+    if (active.access === "free") {
+      showToast("Сначала получите бесплатный ключ на 2 часа");
+      watchAdBtn.click();
+    } else {
+      showToast("Для этого сервера нужна подписка");
+    }
+    return;
+  }
+
   if (!active.configUrl.includes("://replace-with-real")) {
     state.mode = "waiting";
     renderByMode();
@@ -455,7 +616,7 @@ changeServerBtn.addEventListener("click", () => {
   let nextIndex = state.serverIndex;
   for (let i = 0; i < serverConfigs.length; i += 1) {
     nextIndex = (nextIndex + 1) % serverConfigs.length;
-    if (serverConfigs[nextIndex].status !== "offline") {
+    if (serverConfigs[nextIndex].status !== "offline" && canAccessServer(serverConfigs[nextIndex])) {
       break;
     }
   }
@@ -471,7 +632,7 @@ autoServerBtn.addEventListener("click", () => {
   let bestPing = Number.POSITIVE_INFINITY;
 
   serverConfigs.forEach((server, index) => {
-    if (server.access === "paid" && !hasPaidAccess()) {
+    if (!canAccessServer(server)) {
       return;
     }
     if (server.status === "offline") {
@@ -482,6 +643,12 @@ autoServerBtn.addEventListener("click", () => {
       bestIndex = index;
     }
   });
+
+  if (bestPing === Number.POSITIVE_INFINITY) {
+    showToast("Сначала получите бесплатный ключ на 2 часа");
+    watchAdBtn.click();
+    return;
+  }
 
   state.serverIndex = bestIndex;
   updateServerView();
@@ -497,6 +664,10 @@ onboardingBtn.addEventListener("click", () => {
 onboardingHelpBtn.addEventListener("click", () => {
   onboarding.classList.remove("hidden");
 });
+
+
+watchAdBtn.addEventListener("click", openRewardAd);
+claimAccessBtn.addEventListener("click", claimFreeAccess);
 
 async function initializeBaselineIp() {
   try {
@@ -522,10 +693,13 @@ function showOnboardingIfNeeded() {
 }
 
 bootstrapFromTelegram();
+loadRewardState();
 updateServerView();
 renderServerList();
 syncSubscription();
+syncFreeAccessPanel();
 renderTariffList();
 renderByMode();
 showOnboardingIfNeeded();
 initializeBaselineIp();
+window.setInterval(syncFreeAccessPanel, 1000);
