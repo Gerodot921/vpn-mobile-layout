@@ -10,7 +10,7 @@ from threading import Lock
 from typing import TypedDict
 
 from app.json_storage import load_json_file, save_json_file
-from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_profile, remove_peer_from_server
+from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_profile, remove_peer_from_server, reset_wireguard_profile
 
 FREE_ACCESS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "free_access.json"
 DEFAULT_FREE_ACCESS_HOURS = 1
@@ -191,33 +191,64 @@ def grant_free_access(
     source: str = "mini_app_ad",
     force_extend: bool = False,
 ) -> tuple[FreeAccessRecord, bool]:
+    """Grant free access to a user.
+    
+    If access is still active: return existing record (reuse same peer)
+    If access expired/doesn't exist: create BRAND NEW profile with new private key and peer
+    
+    This ensures 1 person can only have 1 device connected at a time.
+    If they share the config with friends, those friends get rejected (old key).
+    """
     effective_hours = _configured_free_access_hours() if hours is None else max(hours, 1)
     user_key = _user_key(user_id)
+    
+    # Check if access is still active without recreating
     with _state_lock:
         state = _load_state()
         now = _now_utc()
         current = state.get(user_key)
-        profile = ensure_wireguard_profile(user_id)
-
-        # If free access is already active and not forcing extension, return existing
+        
         if current is not None:
             try:
                 current_expires_at = _parse_dt(current["expires_at"])
                 if current_expires_at > now and not force_extend:
-                    # Access is still valid - reuse existing peer
+                    # Still valid - return existing record without creating new peer
                     return current, False
-                base_expires_at = current_expires_at if current_expires_at > now else now
             except Exception:
-                base_expires_at = now
-        else:
-            base_expires_at = now
-
-        # Create new record for new peer (slot = 1 for free access)
+                pass
+    
+    # Access expired or doesn't exist - create BRAND NEW profile
+    # First, remove the old peer from server if it exists
+    old_peer_public_key = None
+    with _state_lock:
+        state = _load_state()
+        current = state.get(user_key)
+        if current and current.get("peer_public_key"):
+            old_peer_public_key = current.get("peer_public_key")
+    
+    if old_peer_public_key:
+        try:
+            remove_peer_from_server(old_peer_public_key, user_id)
+            logging.info("Removed old free access peer for user_id=%s", user_id)
+        except Exception:
+            logging.warning("Failed to remove old free access peer for user_id=%s", user_id)
+    
+    # Reset profile to get completely new private key
+    reset_wireguard_profile(user_id)
+    profile = ensure_wireguard_profile(user_id)
+    
+    # Create new free access record with new peer
+    with _state_lock:
+        state = _load_state()
+        now = _now_utc()
+        current = state.get(user_key)
+        claims_count = (current.get("claims_count", 0) if current else 0) + 1
+        
         new_record: FreeAccessRecord = {
             "access_key": profile["profile_id"],
             "granted_at": now.isoformat(),
-            "expires_at": (base_expires_at + timedelta(hours=effective_hours)).isoformat(),
-            "claims_count": (current.get("claims_count", 0) if current else 0) + 1,
+            "expires_at": (now + timedelta(hours=effective_hours)).isoformat(),
+            "claims_count": claims_count,
             "source": source,
             "vpn_protocol": "WireGuard",
             "vpn_profile_name": profile["profile_id"],
