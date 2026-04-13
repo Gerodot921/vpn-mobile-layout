@@ -247,29 +247,41 @@ def get_referral_invites(referrer_id: int) -> list[ReferralInviteInfo]:
     with _state_lock:
         state = _load_state()
 
-    invites: list[ReferralInviteInfo] = []
-    for user_key, data in state.items():
-        if user_key == referrer_key:
-            continue
-        if data.get("referrer_id") != referrer_id:
-            continue
-        if not data.get("activated"):
-            continue
+        changed = False
+        invites: list[ReferralInviteInfo] = []
 
-        activated_at = data.get("activated_at")
-        if not isinstance(activated_at, str) or not activated_at:
-            continue
+        for user_key, data in state.items():
+            if user_key == referrer_key:
+                continue
+            if data.get("referrer_id") != referrer_id:
+                continue
+            if not data.get("activated"):
+                continue
 
-        username = data.get("username", "")
-        if not isinstance(username, str) or not username:
-            username = f"user_{user_key}"
+            activated_at = data.get("activated_at")
+            # Legacy records may not have activation timestamp yet.
+            if not isinstance(activated_at, str) or not activated_at:
+                activated_at = _now_iso()
+                data["activated_at"] = activated_at
+                state[user_key] = data
+                changed = True
 
-        invites.append(
-            {
-                "username": username,
-                "activated_at": activated_at,
-            }
-        )
+            username = data.get("username", "")
+            if not isinstance(username, str) or not username:
+                username = f"user_{user_key}"
+                data["username"] = username
+                state[user_key] = data
+                changed = True
+
+            invites.append(
+                {
+                    "username": username,
+                    "activated_at": activated_at,
+                }
+            )
+
+        if changed:
+            _save_state(state)
 
     invites.sort(key=lambda item: item["activated_at"], reverse=True)
     return invites
