@@ -16,7 +16,7 @@ async def start(message: Message, command: CommandObject | None = None) -> None:
         return
 
     user_id = message.from_user.id
-    is_new_user = register_user(user_id)
+    is_new_user = register_user(user_id, message.from_user.username)
     ensure_subscription(user_id)
 
     referrer_id = parse_referrer_id(command.args if command else None)

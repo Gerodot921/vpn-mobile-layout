@@ -10,9 +10,10 @@ from threading import Lock
 from typing import TypedDict
 
 from app.json_storage import load_json_file, save_json_file
-from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_profile, remove_peer_from_server, reset_wireguard_profile
+from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename, remove_peer_from_server, reset_wireguard_profile
 
 FREE_ACCESS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "free_access.json"
+FREE_ACCESS_STATS_PATH = Path(__file__).resolve().parents[1] / "data" / "free_access_stats.json"
 DEFAULT_FREE_ACCESS_HOURS = 1
 FREE_ACCESS_CLEANUP_INTERVAL_SECONDS = 60
 
@@ -97,6 +98,30 @@ def _save_state(state: FreeAccessState) -> None:
     save_json_file(FREE_ACCESS_STORAGE_PATH, state)
 
 
+def _load_stats() -> dict[str, object]:
+    raw_data = load_json_file(FREE_ACCESS_STATS_PATH, {})
+    if not isinstance(raw_data, dict):
+        return {"total_claims": 0, "unique_users": 0, "claimed_user_ids": []}
+
+    total_claims = raw_data.get("total_claims", 0)
+    unique_users = raw_data.get("unique_users", 0)
+    claimed_user_ids = raw_data.get("claimed_user_ids", [])
+
+    if not isinstance(claimed_user_ids, list):
+        claimed_user_ids = []
+
+    safe_user_ids = [item for item in claimed_user_ids if isinstance(item, str) and item.isdigit()]
+    return {
+        "total_claims": total_claims if isinstance(total_claims, int) and total_claims >= 0 else 0,
+        "unique_users": unique_users if isinstance(unique_users, int) and unique_users >= 0 else 0,
+        "claimed_user_ids": safe_user_ids,
+    }
+
+
+def _save_stats(stats: dict[str, object]) -> None:
+    save_json_file(FREE_ACCESS_STATS_PATH, stats)
+
+
 def _new_key() -> str:
     return f"SKULL-{secrets.token_urlsafe(8).upper()}"
 
@@ -127,6 +152,36 @@ def get_free_access_record(user_id: int) -> FreeAccessRecord | None:
     with _state_lock:
         state = _load_state()
         return state.get(_user_key(user_id))
+
+
+def get_total_free_claims() -> int:
+    with _state_lock:
+        stats = _load_stats()
+        return int(stats.get("total_claims", 0))
+
+
+def get_total_free_users() -> int:
+    with _state_lock:
+        stats = _load_stats()
+        return int(stats.get("unique_users", 0))
+
+
+def list_active_free_access_records() -> dict[int, FreeAccessRecord]:
+    now = _now_utc()
+    active: dict[int, FreeAccessRecord] = {}
+    with _state_lock:
+        state = _load_state()
+
+    for user_key, record in state.items():
+        try:
+            user_id = int(user_key)
+            if _parse_dt(record["expires_at"]) <= now:
+                continue
+        except Exception:
+            continue
+        active[user_id] = record
+
+    return active
 
 
 def mark_free_access_peer_added(user_id: int) -> bool:
@@ -259,6 +314,16 @@ def grant_free_access(
         }
         state[user_key] = new_record
         _save_state(state)
+
+        stats = _load_stats()
+        stats["total_claims"] = int(stats.get("total_claims", 0)) + 1
+        claimed_user_ids = set(str(item) for item in stats.get("claimed_user_ids", []) if isinstance(item, str))
+        if user_key not in claimed_user_ids:
+            claimed_user_ids.add(user_key)
+            stats["unique_users"] = int(stats.get("unique_users", 0)) + 1
+        stats["claimed_user_ids"] = sorted(claimed_user_ids)
+        _save_stats(stats)
+
         return new_record, True
 
 

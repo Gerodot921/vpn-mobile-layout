@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
 from threading import Lock
 from typing import TypedDict
 
@@ -17,9 +18,20 @@ class UserReferralData(TypedDict):
     invited_count: int
     bonus_days: int
     activated: bool
+    username: str
+    activated_at: str | None
+
+
+class ReferralInviteInfo(TypedDict):
+    username: str
+    activated_at: str
 
 
 ReferralState = dict[str, UserReferralData]
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _user_key(user_id: int) -> str:
@@ -40,12 +52,16 @@ def _load_state() -> ReferralState:
         invited_count = value.get("invited_count", 0)
         bonus_days = value.get("bonus_days", 0)
         activated = value.get("activated", False)
+        username = value.get("username", "")
+        activated_at = value.get("activated_at")
 
         state[key] = {
             "referrer_id": referrer_id if isinstance(referrer_id, int) else None,
             "invited_count": invited_count if isinstance(invited_count, int) else 0,
             "bonus_days": bonus_days if isinstance(bonus_days, int) else 0,
             "activated": bool(activated),
+            "username": username if isinstance(username, str) else "",
+            "activated_at": activated_at if isinstance(activated_at, str) else None,
         }
 
     return state
@@ -55,7 +71,7 @@ def _save_state(state: ReferralState) -> None:
     save_json_file(REFERRALS_STORAGE_PATH, state)
 
 
-def ensure_user(user_id: int) -> UserReferralData:
+def ensure_user(user_id: int, username: str | None = None) -> UserReferralData:
     user_key = _user_key(user_id)
     with _state_lock:
         state = _load_state()
@@ -65,12 +81,20 @@ def ensure_user(user_id: int) -> UserReferralData:
                 "invited_count": 0,
                 "bonus_days": 0,
                 "activated": False,
+                "username": username or "",
+                "activated_at": None,
             }
             _save_state(state)
+        elif isinstance(username, str) and username:
+            record = state[user_key]
+            if record.get("username", "") != username:
+                record["username"] = username
+                state[user_key] = record
+                _save_state(state)
         return state[user_key]
 
 
-def register_user(user_id: int) -> bool:
+def register_user(user_id: int, username: str | None = None) -> bool:
     user_key = _user_key(user_id)
     with _state_lock:
         state = _load_state()
@@ -82,9 +106,36 @@ def register_user(user_id: int) -> bool:
             "invited_count": 0,
             "bonus_days": 0,
             "activated": False,
+            "username": username or "",
+            "activated_at": None,
         }
         _save_state(state)
         return True
+
+
+def upsert_username(user_id: int, username: str | None) -> None:
+    if not isinstance(username, str) or not username:
+        return
+
+    user_key = _user_key(user_id)
+    with _state_lock:
+        state = _load_state()
+        user = state.get(
+            user_key,
+            {
+                "referrer_id": None,
+                "invited_count": 0,
+                "bonus_days": 0,
+                "activated": False,
+                "username": "",
+                "activated_at": None,
+            },
+        )
+        if user.get("username", "") == username:
+            return
+        user["username"] = username
+        state[user_key] = user
+        _save_state(state)
 
 
 def parse_referrer_id(payload: str | None) -> int | None:
@@ -111,6 +162,8 @@ def bind_referrer_for_new_user(user_id: int, referrer_id: int) -> bool:
                 "invited_count": 0,
                 "bonus_days": 0,
                 "activated": False,
+                "username": "",
+                "activated_at": None,
             }
             state[user_key] = user
 
@@ -127,13 +180,15 @@ def bind_referrer_for_new_user(user_id: int, referrer_id: int) -> bool:
                 "invited_count": 0,
                 "bonus_days": 0,
                 "activated": False,
+                "username": "",
+                "activated_at": None,
             },
         )
         _save_state(state)
         return True
 
 
-def activate_user_and_apply_bonus(user_id: int) -> int | None:
+def activate_user_and_apply_bonus(user_id: int, username: str | None = None) -> int | None:
     user_key = _user_key(user_id)
 
     with _state_lock:
@@ -145,13 +200,18 @@ def activate_user_and_apply_bonus(user_id: int) -> int | None:
                 "invited_count": 0,
                 "bonus_days": 0,
                 "activated": False,
+                "username": "",
+                "activated_at": None,
             },
         )
 
         if user["activated"]:
             return None
 
+        if isinstance(username, str) and username:
+            user["username"] = username
         user["activated"] = True
+        user["activated_at"] = _now_iso()
         referrer_id = user["referrer_id"]
         state[user_key] = user
 
@@ -167,6 +227,8 @@ def activate_user_and_apply_bonus(user_id: int) -> int | None:
                 "invited_count": 0,
                 "bonus_days": 0,
                 "activated": False,
+                "username": "",
+                "activated_at": None,
             },
         )
         referrer["invited_count"] += 1
@@ -178,3 +240,36 @@ def activate_user_and_apply_bonus(user_id: int) -> int | None:
     grant_free_access(referrer_id, 24, source="referral_bonus", force_extend=True)
     grant_free_access(user_id, 48, source="referral", force_extend=True)
     return referrer_id
+
+
+def get_referral_invites(referrer_id: int) -> list[ReferralInviteInfo]:
+    referrer_key = _user_key(referrer_id)
+    with _state_lock:
+        state = _load_state()
+
+    invites: list[ReferralInviteInfo] = []
+    for user_key, data in state.items():
+        if user_key == referrer_key:
+            continue
+        if data.get("referrer_id") != referrer_id:
+            continue
+        if not data.get("activated"):
+            continue
+
+        activated_at = data.get("activated_at")
+        if not isinstance(activated_at, str) or not activated_at:
+            continue
+
+        username = data.get("username", "")
+        if not isinstance(username, str) or not username:
+            username = f"user_{user_key}"
+
+        invites.append(
+            {
+                "username": username,
+                "activated_at": activated_at,
+            }
+        )
+
+    invites.sort(key=lambda item: item["activated_at"], reverse=True)
+    return invites

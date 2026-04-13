@@ -64,7 +64,7 @@ async def referral_menu(message: Message) -> None:
         return
 
     user_id = message.from_user.id
-    user_data = ensure_user(user_id)
+    user_data = ensure_user(user_id, message.from_user.username)
     bot_info = await message.bot.get_me()
     bot_username = bot_info.username or "your_bot"
 

@@ -21,7 +21,7 @@ from app.free_access import (
     is_free_access_active,
     mark_free_access_peer_added,
 )
-from app.referrals import ensure_user
+from app.referrals import ensure_user, get_referral_invites
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.wireguard import ensure_wireguard_profile
 from app.subscriptions import get_remaining_text, get_subscription_plan_name
@@ -92,7 +92,8 @@ def _init_data_from_payload(payload: dict[str, Any]) -> str:
 
 def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
     user_id = int(user_data["id"])
-    referral = ensure_user(user_id)
+    referral = ensure_user(user_id, user_data.get("username"))
+    referral_invites = get_referral_invites(user_id)
     free_record = get_free_access_record(user_id)
     paid_remaining = get_remaining_text(user_id)
     paid_plan_name = get_subscription_plan_name(user_id)
@@ -113,6 +114,7 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
             "invited_count": referral["invited_count"],
             "bonus_days": referral["bonus_days"],
             "activated": referral["activated"],
+            "invites": referral_invites,
         },
         "free_access": {
             "active": free_active,
@@ -153,7 +155,7 @@ async def claim_free_access(request: web.Request) -> web.Response:
         user_data = _extract_user(init_data)
         user_id = int(user_data["id"])
 
-        ensure_user(user_id)
+        ensure_user(user_id, user_data.get("username"))
         ensure_wireguard_profile(user_id)
 
         if is_free_access_active(user_id):

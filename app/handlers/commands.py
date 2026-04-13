@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramRetryAfter
@@ -9,14 +10,16 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
+from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
 from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
+from app.subscriptions import list_active_subscriptions
 from app.texts import (
     FREE_ACCESS_PANEL_TEXT,
     MINI_APP_ENTRY_TEXT,
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, reset_wireguard_profile
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, reset_wireguard_profile
 
 # Owner ID for admin commands
 OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
@@ -27,6 +30,24 @@ router = Router()
 def _is_owner(message: Message) -> bool:
     """Check if the user is the owner."""
     return message.from_user and message.from_user.id == OWNER_ID
+
+
+def _fmt_dt(value: str) -> str:
+    try:
+        return datetime.fromisoformat(value).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return value
+
+
+async def _resolve_user_label(message: Message, user_id: int) -> str:
+    try:
+        chat = await message.bot.get_chat(user_id)
+        username = getattr(chat, "username", None)
+        if isinstance(username, str) and username:
+            return f"@{username}"
+    except Exception:
+        pass
+    return "@unknown"
 
 
 def _mini_app_text_with_fallback() -> str:
@@ -154,3 +175,51 @@ async def reset_and_send_wireguard_profile(message: Message) -> None:
     reset_wireguard_profile(user_id)
     await message.answer("Профиль сброшен. Отправляю новый .conf")
     await send_wireguard_profile(message)
+
+
+@router.message(Command(commands=["allstat"]), F.func(_is_owner))
+async def all_stat(message: Message) -> None:
+    free_total_claims = get_total_free_claims()
+    free_total_users = get_total_free_users()
+    active_free = list_active_free_access_records()
+    active_paid = list_active_subscriptions()
+
+    lines: list[str] = []
+    lines.append("📊 Общая статистика")
+    lines.append("")
+    lines.append(f"Бесплатный конфиг получали (раз): {free_total_claims}")
+    lines.append(f"Пользовались бесплатным конфигом (уникальных): {free_total_users}")
+    lines.append(f"Активных бесплатных: {len(active_free)}")
+    lines.append(f"Активных платных: {len(active_paid)}")
+    lines.append("")
+    lines.append("🟢 Бесплатные подписки")
+
+    if not active_free:
+        lines.append("Нет активных")
+    else:
+        for user_id, record in sorted(active_free.items(), key=lambda item: item[1].get("expires_at", "")):
+            user_label = await _resolve_user_label(message, user_id)
+            config_name = record.get("vpn_config_name") or "-"
+            expires_at = _fmt_dt(record.get("expires_at", "-"))
+            lines.append(f"{user_label} | id={user_id} | config={config_name} | до={expires_at}")
+
+    lines.append("")
+    lines.append("💎 Платные подписки")
+    if not active_paid:
+        lines.append("Нет активных")
+    else:
+        for user_id, record in sorted(active_paid.items(), key=lambda item: item[1].get("expires_at", "")):
+            user_label = await _resolve_user_label(message, user_id)
+            profile = get_wireguard_profile(user_id)
+            config_name = profile.get("config_filename", "-") if profile else "-"
+            expires_at = _fmt_dt(record.get("expires_at", "-"))
+            lines.append(f"{user_label} | id={user_id} | config={config_name} | до={expires_at}")
+
+    report = "\n".join(lines)
+    if len(report) <= 3900:
+        await message.answer(report)
+        return
+
+    for start in range(0, len(lines), 45):
+        chunk = "\n".join(lines[start:start + 45])
+        await message.answer(chunk)

@@ -42,7 +42,7 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
         return
 
     user_id = callback.from_user.id
-    referrer_id = activate_user_and_apply_bonus(user_id)
+    referrer_id = activate_user_and_apply_bonus(user_id, callback.from_user.username)
     if referrer_id is None:
         return
 
@@ -183,7 +183,7 @@ async def _show_referral_program(callback: CallbackQuery) -> None:
         return
 
     user_id = callback.from_user.id
-    user_data = ensure_user(user_id)
+    user_data = ensure_user(user_id, callback.from_user.username)
     bot_info = await callback.bot.get_me()
     bot_username = bot_info.username or "your_bot"
 
@@ -298,7 +298,7 @@ async def share_referral(callback: CallbackQuery) -> None:
         return
 
     user_id = callback.from_user.id
-    user_data = ensure_user(user_id)
+    user_data = ensure_user(user_id, callback.from_user.username)
     bot_info = await callback.bot.get_me()
     bot_username = bot_info.username or "your_bot"
 

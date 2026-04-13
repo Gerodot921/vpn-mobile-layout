@@ -188,6 +188,23 @@ def get_subscription_plan_name(user_id: int) -> str:
     return plan_name if isinstance(plan_name, str) and plan_name else "Базовый"
 
 
+def list_active_subscriptions() -> dict[int, SubscriptionRecord]:
+    now = _now_utc()
+    active: dict[int, SubscriptionRecord] = {}
+    state = _load_state()
+
+    for user_key, record in state.items():
+        try:
+            user_id = int(user_key)
+            if _parse_expires_at(record["expires_at"]) <= now:
+                continue
+        except Exception:
+            continue
+        active[user_id] = record
+
+    return active
+
+
 def _build_reminder_candidates(state: SubscriptionState) -> list[tuple[int, int, timedelta]]:
     now = _now_utc()
     candidates: list[tuple[int, int, timedelta]] = []

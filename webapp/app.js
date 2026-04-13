@@ -17,6 +17,7 @@ const rewardTimer = document.getElementById("rewardTimer");
 const watchAdBtn = document.getElementById("watchAdBtn");
 const claimAccessBtn = document.getElementById("claimAccessBtn");
 const refLinkInput = document.getElementById("refLink");
+const referralInvites = document.getElementById("referralInvites");
 const referralStats = document.getElementById("referralStats");
 const userLine = document.getElementById("userLine");
 const copyRefBtn = document.getElementById("copyRefBtn");
@@ -97,6 +98,7 @@ const state = {
     invitedCount: 0,
     bonusDays: 0,
     activated: false,
+    invites: [],
   },
 };
 
@@ -460,6 +462,38 @@ function updateReferralStats() {
   const invitedCount = state.referral?.invitedCount || 0;
   const bonusDays = state.referral?.bonusDays || 0;
   referralStats.textContent = `👥 Приглашено: ${invitedCount} • 🎁 Дней: ${bonusDays}`;
+
+  if (!referralInvites) {
+    return;
+  }
+
+  referralInvites.innerHTML = "";
+  const invites = Array.isArray(state.referral?.invites) ? state.referral.invites : [];
+  if (invites.length === 0) {
+    return;
+  }
+
+  invites.forEach((invite) => {
+    const username = typeof invite?.username === "string" && invite.username
+      ? invite.username
+      : "unknown";
+    const activatedAt = typeof invite?.activated_at === "string" ? invite.activated_at : "";
+    const parsed = activatedAt ? Date.parse(activatedAt) : Number.NaN;
+    const dateText = Number.isFinite(parsed)
+      ? new Date(parsed).toLocaleString("ru-RU", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : activatedAt;
+
+    const row = document.createElement("div");
+    row.className = "ref-invite-row";
+    row.textContent = `${username.startsWith("@") ? username : `@${username}`} • ${dateText}`;
+    referralInvites.appendChild(row);
+  });
 }
 
 
@@ -474,6 +508,7 @@ function applyUserState(payload) {
     invitedCount: Number(referral.invited_count || 0),
     bonusDays: Number(referral.bonus_days || 0),
     activated: Boolean(referral.activated),
+    invites: Array.isArray(referral.invites) ? referral.invites : [],
   };
 
   const freeAccess = payload.free_access || {};

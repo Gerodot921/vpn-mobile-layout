@@ -39,7 +39,7 @@ async def webapp_data(message: Message) -> None:
         return
 
     user_id = message.from_user.id
-    ensure_user(user_id)
+    ensure_user(user_id, message.from_user.username)
     ensure_subscription(user_id)
 
     payload = _format_payload(message.web_app_data.data)
