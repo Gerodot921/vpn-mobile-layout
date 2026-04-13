@@ -19,6 +19,7 @@ from app.free_access import (
     grant_free_access,
     get_free_access_record,
     is_free_access_active,
+    mark_free_access_peer_added,
 )
 from app.referrals import ensure_user
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
@@ -165,6 +166,12 @@ async def claim_free_access(request: web.Request) -> web.Response:
             record, created = grant_free_access(user_id, DEFAULT_FREE_ACCESS_HOURS, source="mini_app_ad", force_extend=False)
             action_label = "mini_app_ad"
 
+        # Ensure peer is added to server only once per free access slot
+        peer_added = record.get("peer_added_to_server", False) if record else False
+        if not peer_added and record:
+            add_peer_to_server(user_id)
+            mark_free_access_peer_added(user_id)
+
         response_payload = _build_state_payload(user_data)
         response_payload["claim"] = {
             "created": created,
@@ -199,11 +206,10 @@ async def claim_free_access(request: web.Request) -> web.Response:
                         BufferedInputFile(config_text.encode("utf-8"), filename=config_name),
                         caption="Профиль WireGuard / AmneziaWG",
                     )
-                    add_peer_to_server(user_id)
                 else:
                     logging.warning("WireGuard config text is empty for user_id=%s", user_id)
             except Exception:
-                logging.exception("Telegram notify/peer step failed for user_id=%s", user_id)
+                logging.exception("Telegram notify step failed for user_id=%s", user_id)
 
         return web.json_response(response_payload)
     except web.HTTPException as exc:

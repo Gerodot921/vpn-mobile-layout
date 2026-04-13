@@ -29,6 +29,8 @@ class FreeAccessRecord(TypedDict):
     vpn_profile_name: str
     vpn_config_name: str
     vpn_configured: bool
+    peer_public_key: str
+    peer_added_to_server: bool
 
 
 FreeAccessState = dict[str, FreeAccessRecord]
@@ -71,6 +73,8 @@ def _load_state() -> FreeAccessState:
         vpn_profile_name = value.get("vpn_profile_name", access_key)
         vpn_config_name = value.get("vpn_config_name", f"skull-vpn-{access_key}.conf")
         vpn_configured = value.get("vpn_configured", False)
+        peer_public_key = value.get("peer_public_key", "")
+        peer_added_to_server = value.get("peer_added_to_server", False)
 
         state[key] = {
             "access_key": access_key,
@@ -82,6 +86,8 @@ def _load_state() -> FreeAccessState:
             "vpn_profile_name": vpn_profile_name if isinstance(vpn_profile_name, str) and vpn_profile_name else access_key,
             "vpn_config_name": vpn_config_name if isinstance(vpn_config_name, str) and vpn_config_name else f"skull-vpn-{access_key}.conf",
             "vpn_configured": bool(vpn_configured),
+            "peer_public_key": peer_public_key if isinstance(peer_public_key, str) else "",
+            "peer_added_to_server": bool(peer_added_to_server),
         }
 
     return state
@@ -121,6 +127,20 @@ def get_free_access_record(user_id: int) -> FreeAccessRecord | None:
     with _state_lock:
         state = _load_state()
         return state.get(_user_key(user_id))
+
+
+def mark_free_access_peer_added(user_id: int) -> bool:
+    """Mark that the peer for free access has been added to the server."""
+    user_key = _user_key(user_id)
+    with _state_lock:
+        state = _load_state()
+        record = state.get(user_key)
+        if record is None:
+            return False
+        record["peer_added_to_server"] = True
+        state[user_key] = record
+        _save_state(state)
+        return True
 
 
 def is_free_access_active(user_id: int) -> bool:
@@ -179,10 +199,12 @@ def grant_free_access(
         current = state.get(user_key)
         profile = ensure_wireguard_profile(user_id)
 
+        # If free access is already active and not forcing extension, return existing
         if current is not None:
             try:
                 current_expires_at = _parse_dt(current["expires_at"])
                 if current_expires_at > now and not force_extend:
+                    # Access is still valid - reuse existing peer
                     return current, False
                 base_expires_at = current_expires_at if current_expires_at > now else now
             except Exception:
@@ -190,6 +212,7 @@ def grant_free_access(
         else:
             base_expires_at = now
 
+        # Create new record for new peer (slot = 1 for free access)
         new_record: FreeAccessRecord = {
             "access_key": profile["profile_id"],
             "granted_at": now.isoformat(),
@@ -200,6 +223,8 @@ def grant_free_access(
             "vpn_profile_name": profile["profile_id"],
             "vpn_config_name": get_wireguard_config_filename(user_id),
             "vpn_configured": profile["configured"],
+            "peer_public_key": profile["public_key"],
+            "peer_added_to_server": False,
         }
         state[user_key] = new_record
         _save_state(state)
@@ -210,28 +235,31 @@ def revoke_expired_free_access() -> int:
     now = _now_utc()
     with _state_lock:
         state = _load_state()
-        expired_user_ids: list[int] = []
+        expired_records: list[tuple[str, FreeAccessRecord]] = []
 
         for user_key, record in list(state.items()):
             try:
                 if _parse_dt(record["expires_at"]) > now:
                     continue
-                user_id = int(user_key)
             except Exception:
                 continue
 
-            expired_user_ids.append(user_id)
+            expired_records.append((user_key, record))
             del state[user_key]
 
-        if expired_user_ids:
+        if expired_records:
             _save_state(state)
 
     revoked_count = 0
-    for user_id in expired_user_ids:
-        profile = get_wireguard_profile(user_id)
-        if profile is None:
+    for user_key, record in expired_records:
+        peer_public_key = record.get("peer_public_key", "")
+        if not peer_public_key:
             continue
-        if remove_peer_from_server(profile.get("public_key", ""), user_id):
+        try:
+            user_id = int(user_key)
+        except Exception:
+            continue
+        if remove_peer_from_server(peer_public_key, user_id):
             revoked_count += 1
 
     return revoked_count
