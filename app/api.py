@@ -21,7 +21,7 @@ from app.free_access import (
     is_free_access_active,
     mark_free_access_peer_added,
 )
-from app.referrals import ensure_user, get_referral_invites
+from app.referrals import ensure_user, get_referral_invites, upsert_username
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.wireguard import ensure_wireguard_profile
 from app.subscriptions import get_remaining_text, get_subscription_plan_name
@@ -134,12 +134,49 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _enrich_referral_invites_with_usernames(payload: dict[str, Any], bot: Bot | None) -> None:
+    if bot is None:
+        return
+
+    referral = payload.get("referral") if isinstance(payload, dict) else None
+    if not isinstance(referral, dict):
+        return
+
+    invites = referral.get("invites")
+    if not isinstance(invites, list):
+        return
+
+    for invite in invites:
+        if not isinstance(invite, dict):
+            continue
+
+        user_id = invite.get("user_id")
+        username = invite.get("username")
+        if not isinstance(user_id, int):
+            continue
+
+        needs_resolve = not isinstance(username, str) or not username or username.startswith("user_")
+        if not needs_resolve:
+            continue
+
+        try:
+            chat = await bot.get_chat(user_id)
+            chat_username = getattr(chat, "username", None)
+            if isinstance(chat_username, str) and chat_username:
+                invite["username"] = chat_username
+                upsert_username(user_id, chat_username)
+        except Exception:
+            continue
+
+
 async def user_state(request: web.Request) -> web.Response:
     try:
         payload = await _read_request_json(request)
         init_data = _init_data_from_payload(payload)
         user_data = _extract_user(init_data)
-        return web.json_response(_build_state_payload(user_data))
+        response_payload = _build_state_payload(user_data)
+        await _enrich_referral_invites_with_usernames(response_payload, request.app.get("bot"))
+        return web.json_response(response_payload)
     except web.HTTPException as exc:
         logging.warning("/api/user-state failed: %s", exc.text)
         return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
@@ -175,6 +212,7 @@ async def claim_free_access(request: web.Request) -> web.Response:
             mark_free_access_peer_added(user_id)
 
         response_payload = _build_state_payload(user_data)
+        await _enrich_referral_invites_with_usernames(response_payload, request.app.get("bot"))
         response_payload["claim"] = {
             "created": created,
             "action": action_label,

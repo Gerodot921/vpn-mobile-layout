@@ -491,7 +491,13 @@ function updateReferralStats() {
 
     const row = document.createElement("div");
     row.className = "ref-invite-row";
-    row.textContent = `${username.startsWith("@") ? username : `@${username}`} • ${dateText}`;
+    row.innerHTML = `
+      <div class="ref-invite-top">
+        <span class="ref-invite-user">${username.startsWith("@") ? username : `@${username}`}</span>
+        <span class="ref-invite-badge">Активирован</span>
+      </div>
+      <div class="ref-invite-date">${dateText}</div>
+    `;
     referralInvites.appendChild(row);
   });
 }

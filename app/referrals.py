@@ -23,6 +23,7 @@ class UserReferralData(TypedDict):
 
 
 class ReferralInviteInfo(TypedDict):
+    user_id: int
     username: str
     activated_at: str
 
@@ -275,6 +276,7 @@ def get_referral_invites(referrer_id: int) -> list[ReferralInviteInfo]:
 
             invites.append(
                 {
+                    "user_id": int(user_key),
                     "username": username,
                     "activated_at": activated_at,
                 }
