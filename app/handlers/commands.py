@@ -18,7 +18,15 @@ from app.texts import (
 )
 from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, reset_wireguard_profile
 
+# Owner ID for admin commands
+OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
+
 router = Router()
+
+
+def _is_owner(message: Message) -> bool:
+    """Check if the user is the owner."""
+    return message.from_user and message.from_user.id == OWNER_ID
 
 
 def _mini_app_text_with_fallback() -> str:
@@ -31,7 +39,7 @@ def _mini_app_text_with_fallback() -> str:
     return MINI_APP_ENTRY_TEXT
 
 
-@router.message(Command(commands=["clear_chat", "ckear_chat"]))
+@router.message(Command(commands=["clear_chat", "ckear_chat"]), F.func(_is_owner))
 async def clear_chat(message: Message) -> None:
     chat = message.chat
     last_message_id = message.message_id
@@ -57,7 +65,7 @@ async def clear_chat(message: Message) -> None:
             break
 
 
-@router.message(Command(commands=["miniapp"]))
+@router.message(Command(commands=["miniapp"]), F.func(_is_owner))
 async def open_mini_app(message: Message) -> None:
     await message.answer(
         f"{FREE_ACCESS_PANEL_TEXT}\n\n{_mini_app_text_with_fallback()}",
@@ -66,7 +74,7 @@ async def open_mini_app(message: Message) -> None:
     )
 
 
-@router.message(Command(commands=["freevpn"]))
+@router.message(Command(commands=["freevpn"]), F.func(_is_owner))
 async def open_free_vpn(message: Message) -> None:
     await message.answer(
         f"{FREE_ACCESS_PANEL_TEXT}\n\n{_mini_app_text_with_fallback()}",
@@ -75,7 +83,7 @@ async def open_free_vpn(message: Message) -> None:
     )
 
 
-@router.message(Command(commands=["getsms"]))
+@router.message(Command(commands=["getsms"]), F.func(_is_owner))
 async def get_sms(message: Message) -> None:
     if not message.from_user:
         return
@@ -100,7 +108,7 @@ async def mini_app_not_configured(callback: CallbackQuery) -> None:
     await callback.answer(MINI_APP_NOT_CONFIGURED_TEXT, show_alert=True)
 
 
-@router.message(Command(commands=["profile", "wg", "conf"]))
+@router.message(Command(commands=["profile", "wg", "conf"]), F.func(_is_owner))
 async def send_wireguard_profile(message: Message) -> None:
     if not message.from_user:
         return
@@ -132,12 +140,12 @@ async def send_wireguard_profile(message: Message) -> None:
         await message.answer(f"{filename}\n\n{config_text}")
 
 
-@router.message(F.text.in_({"profile", "Profile", "профиль", "конфиг", "config"}))
+@router.message(F.text.in_({"profile", "Profile", "профиль", "конфиг", "config"}), F.func(_is_owner))
 async def send_wireguard_profile_text_alias(message: Message) -> None:
     await send_wireguard_profile(message)
 
 
-@router.message(Command(commands=["profile_reset", "wg_reset"]))
+@router.message(Command(commands=["profile_reset", "wg_reset"]), F.func(_is_owner))
 async def reset_and_send_wireguard_profile(message: Message) -> None:
     if not message.from_user:
         return
