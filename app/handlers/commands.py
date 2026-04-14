@@ -19,7 +19,7 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, reset_wireguard_profile
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
 
 # Owner ID for admin commands
 OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
@@ -48,6 +48,21 @@ async def _resolve_user_label(message: Message, user_id: int) -> str:
     except Exception:
         pass
     return "@unknown"
+
+
+def _endpoint_to_ip(endpoint: str | None) -> str:
+    if not isinstance(endpoint, str) or not endpoint or endpoint == "(none)":
+        return "-"
+
+    endpoint = endpoint.strip()
+    if endpoint.startswith("[") and "]:" in endpoint:
+        return endpoint[1:].split("]:", 1)[0]
+
+    if endpoint.count(":") == 1:
+        return endpoint.rsplit(":", 1)[0]
+
+    # Fallback for unexpected formats.
+    return endpoint
 
 
 def _mini_app_text_with_fallback() -> str:
@@ -183,6 +198,7 @@ async def all_stat(message: Message) -> None:
     free_total_users = get_total_free_users()
     active_free = list_active_free_access_records()
     active_paid = list_active_subscriptions()
+    peer_endpoints = list_peer_endpoints()
 
     lines: list[str] = []
     lines.append("📊 Общая статистика")
@@ -201,7 +217,10 @@ async def all_stat(message: Message) -> None:
             user_label = await _resolve_user_label(message, user_id)
             config_name = record.get("vpn_config_name") or "-"
             expires_at = _fmt_dt(record.get("expires_at", "-"))
-            lines.append(f"{user_label} | id={user_id} | config={config_name} | до={expires_at}")
+            profile = get_wireguard_profile(user_id)
+            public_key = profile.get("public_key", "") if profile else ""
+            endpoint_ip = _endpoint_to_ip(peer_endpoints.get(public_key))
+            lines.append(f"{user_label} | id={user_id} | ip={endpoint_ip} | config={config_name} | до={expires_at}")
 
     lines.append("")
     lines.append("💎 Платные подписки")
@@ -213,7 +232,9 @@ async def all_stat(message: Message) -> None:
             profile = get_wireguard_profile(user_id)
             config_name = profile.get("config_filename", "-") if profile else "-"
             expires_at = _fmt_dt(record.get("expires_at", "-"))
-            lines.append(f"{user_label} | id={user_id} | config={config_name} | до={expires_at}")
+            public_key = profile.get("public_key", "") if profile else ""
+            endpoint_ip = _endpoint_to_ip(peer_endpoints.get(public_key))
+            lines.append(f"{user_label} | id={user_id} | ip={endpoint_ip} | config={config_name} | до={expires_at}")
 
     report = "\n".join(lines)
     if len(report) <= 3900:

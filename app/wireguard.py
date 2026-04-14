@@ -561,3 +561,45 @@ def reset_wireguard_profile(user_id: int) -> WireGuardProfile:
         state["profiles"][user_key] = profile
         _save_state(state)
         return profile
+
+
+def list_peer_endpoints() -> dict[str, str]:
+    """Return current peer endpoint mapping {public_key: endpoint} from WireGuard."""
+    docker_bin, docker_container, interface_name = _docker_container_and_iface()
+    if not docker_container or not docker_bin or not interface_name:
+        return {}
+
+    cmd = [
+        docker_bin,
+        "exec",
+        docker_container,
+        "wg",
+        "show",
+        interface_name,
+        "endpoints",
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=10, text=True)
+    except Exception:
+        logging.exception("Failed to read WireGuard peer endpoints")
+        return {}
+
+    if result.returncode != 0:
+        logging.error("Failed to get peer endpoints: %s", result.stderr)
+        return {}
+
+    endpoints: dict[str, str] = {}
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        public_key = parts[0].strip()
+        endpoint = parts[1].strip()
+        if public_key:
+            endpoints[public_key] = endpoint
+
+    return endpoints
