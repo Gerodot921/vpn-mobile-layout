@@ -33,10 +33,11 @@ const paidServerList = document.getElementById("paidServerList");
 const timeWarning = document.getElementById("timeWarning");
 const onboarding = document.getElementById("onboarding");
 const onboardingBtn = document.getElementById("onboardingBtn");
+const serversPanel = document.getElementById("serversPanel");
 
 const INSTALL_AMNEZIA_URL = "https://amnezia.org/ru/downloads";
 const REWARD_AD_URL = "";
-const REWARD_WATCH_SECONDS = 20;
+const REWARD_WATCH_SECONDS = 30;
 const REWARD_READY_STORAGE_KEY = "skull_vpn_reward_ready_at_v1";
 const ONBOARDING_KEY = "skull_vpn_onboarding_seen_v2";
 
@@ -108,6 +109,8 @@ const state = {
     invites: [],
   },
 };
+
+let freeServerAdInProgress = false;
 
 const tariffPlans = [
   {
@@ -261,15 +264,14 @@ function renderServerList() {
       </div>
       <div class="server-meta">
         <span class="meta-badge ${statusClassByType(server.status)}">${server.statusText}</span>
-        <span>Пинг: ${server.pingMs} ms</span>
+        ${server.status === "offline" ? "" : `<span>Пинг: ${server.pingMs} ms</span>`}
       </div>
     `;
 
     item.addEventListener("click", () => {
       if (locked && !canAccessServer(server)) {
         if (server.access === "free") {
-          showToast("Сначала посмотрите рекламу и получите ключ на 1 час");
-          watchAdBtn.click();
+          void startFreeServerAdFlow(server);
         } else {
           showToast("Для этого сервера нужна подписка");
           subscriptionBtn.click();
@@ -298,6 +300,14 @@ function renderServerList() {
   paidServers.forEach((server) => {
     renderServerCard(server, serverConfigs.indexOf(server), paidServerList, !hasPaidAccess());
   });
+}
+
+
+function scrollToServersPanel() {
+  if (!serversPanel) {
+    return;
+  }
+  serversPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function setChip(statusClass, text) {
@@ -486,6 +496,28 @@ function openRewardAd() {
 }
 
 
+async function requestFreeAccess() {
+  if (!tg?.initData) {
+    throw new Error("Откройте Mini App внутри Telegram");
+  }
+
+  const response = await fetch("/api/claim-free-access", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ initData: tg.initData }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || "Не удалось получить доступ");
+  }
+
+  return data;
+}
+
+
 function claimFreeAccess() {
   const now = Date.now();
   if (state.rewardReadyAt > now) {
@@ -493,25 +525,10 @@ function claimFreeAccess() {
     return;
   }
 
-  if (!tg?.initData) {
-    showToast("Откройте Mini App внутри Telegram");
-    return;
-  }
-
   claimAccessBtn.disabled = true;
 
-  fetch("/api/claim-free-access", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ initData: tg.initData }),
-  })
-    .then(async (response) => {
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || "Не удалось получить доступ");
-      }
+  requestFreeAccess()
+    .then((data) => {
       applyUserState(data);
       showToast("Бесплатный доступ активирован");
     })
@@ -519,6 +536,47 @@ function claimFreeAccess() {
       claimAccessBtn.disabled = false;
       showToast(error.message || "Не удалось получить доступ");
     });
+}
+
+
+async function startFreeServerAdFlow(server) {
+  if (freeServerAdInProgress) {
+    showToast("Реклама уже запущена, дождитесь окончания");
+    return;
+  }
+
+  freeServerAdInProgress = true;
+  state.rewardReadyAt = Date.now() + REWARD_WATCH_SECONDS * 1000;
+  saveRewardTimerState();
+  syncFreeAccessPanel();
+
+  if (REWARD_AD_URL) {
+    window.open(REWARD_AD_URL, "_blank", "noopener,noreferrer");
+  }
+
+  showToast(`Реклама запущена на ${REWARD_WATCH_SECONDS} секунд`);
+
+  window.setTimeout(async () => {
+    try {
+      state.rewardReadyAt = 0;
+      saveRewardTimerState();
+
+      const data = await requestFreeAccess();
+      applyUserState(data);
+
+      state.serverIndex = serverConfigs.indexOf(server);
+      updateServerView();
+      renderServerList();
+
+      showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час.");
+    } catch (error) {
+      const message = error?.message || "Не удалось выдать доступ после рекламы";
+      showToast(message);
+    } finally {
+      freeServerAdInProgress = false;
+      syncFreeAccessPanel();
+    }
+  }, REWARD_WATCH_SECONDS * 1000);
 }
 
 
@@ -799,7 +857,7 @@ function bootstrapFromTelegram() {
   }
 }
 
-connectBtn.addEventListener("click", tryOpenAmnezia);
+connectBtn.addEventListener("click", scrollToServersPanel);
 openAgainBtn.addEventListener("click", tryOpenAmnezia);
 checkBtn.addEventListener("click", verifyConnection);
 
