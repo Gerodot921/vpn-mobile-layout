@@ -332,6 +332,27 @@ def revoke_expired_personal_configs() -> int:
     return revoked
 
 
+def delete_personal_config(config_id: str) -> PersonalConfigRecord | None:
+    config_id = config_id.strip()
+    if not config_id:
+        return None
+
+    with _state_lock:
+        state = _load_state()
+        record = state.get(config_id)
+        if record is None:
+            return None
+
+        if record.get("added_to_server"):
+            remove_peer_from_server(record.get("public_key", ""), user_id=0)
+
+        record["revoked_at"] = _now_utc().isoformat()
+        record["added_to_server"] = False
+        state[config_id] = record
+        _save_state(state)
+        return record
+
+
 def create_personal_configs(count: int, days: int) -> list[PersonalConfigRecord]:
     count = max(1, min(count, 100))
     days = max(1, min(days, 3650))

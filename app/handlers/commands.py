@@ -11,7 +11,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
-from app.personal_configs import create_personal_configs, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
+from app.personal_configs import create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
 from app.texts import (
@@ -178,6 +178,21 @@ async def _send_lines_report(message: Message, lines: list[str]) -> None:
     for start in range(0, len(lines), 45):
         chunk = "\n".join(lines[start:start + 45])
         await message.answer(chunk)
+
+
+def _build_admin_help_lines() -> list[str]:
+    return [
+        "🛠 Админ-команды",
+        "",
+        "/allstatb — статистика бесплатных VPN",
+        "/allstatp — статистика платных VPN",
+        "/allstatpers — статистика персональных конфигов",
+        "/allstat — общая статистика по всем типам",
+        "/create <n> <m> — создать n персональных конфигов на m дней",
+        "/delete <config_id> — удалить персональный конфиг по ID",
+        "/profile_reset — сбросить личный VPN-профиль",
+        "/clear_chat — очистить чат",
+    ]
 
 
 def _mini_app_text_with_fallback() -> str:
@@ -376,18 +391,18 @@ async def all_stat_personal(message: Message) -> None:
     await _send_lines_report(message, _build_personal_stats_lines())
 
 
-@router.message(Command(commands=["create_n_m"]), F.func(_is_owner))
-async def create_n_m(message: Message, command: CommandObject | None = None) -> None:
+@router.message(Command(commands=["create"]), F.func(_is_owner))
+async def create_personal_configs_command(message: Message, command: CommandObject | None = None) -> None:
     args = (command.args or "").split() if command else []
     if len(args) != 2:
-        await message.answer("Формат: /create_n_m <кол-во_конфигов> <кол-во_дней>\nПример: /create_n_m 3 30")
+        await message.answer("Формат: /create <кол-во_конфигов> <кол-во_дней>\nПример: /create 3 30")
         return
 
     try:
         count = int(args[0])
         days = int(args[1])
     except Exception:
-        await message.answer("n и m должны быть числами. Пример: /create_n_m 3 30")
+        await message.answer("n и m должны быть числами. Пример: /create 3 30")
         return
 
     if count <= 0 or days <= 0:
@@ -405,3 +420,25 @@ async def create_n_m(message: Message, command: CommandObject | None = None) -> 
             )
         except Exception:
             logging.exception("Failed to send personal config %s", record.get("config_id", "-"))
+
+
+@router.message(Command(commands=["delete"]), F.func(_is_owner))
+async def delete_personal_config_command(message: Message, command: CommandObject | None = None) -> None:
+    config_id = (command.args or "").strip() if command else ""
+    if not config_id:
+        await message.answer("Формат: /delete <config_id>\nПример: /delete PERS-ABC123")
+        return
+
+    deleted = delete_personal_config(config_id)
+    if deleted is None:
+        await message.answer(f"Конфиг {config_id} не найден")
+        return
+
+    await message.answer(
+        f"Конфиг {config_id} удален.\nФайл: {deleted['config_filename']}\nДо: {_fmt_dt(deleted['expires_at'])}"
+    )
+
+
+@router.message(Command(commands=["ahelp"]), F.func(_is_owner))
+async def admin_help(message: Message) -> None:
+    await _send_lines_report(message, _build_admin_help_lines())
