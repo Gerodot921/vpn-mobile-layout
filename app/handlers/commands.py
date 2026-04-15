@@ -130,7 +130,6 @@ def _build_personal_stats_lines() -> list[str]:
     lines.append("🧩 Статистика персональных конфигов")
     lines.append("")
     lines.append(f"Всего персональных (активных): {len(active)}")
-    lines.append(f"Активных персональных: {len(active)}")
     lines.append(f"Авто-отозвано по сроку сейчас: {revoked}")
     lines.append("")
 
