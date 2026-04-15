@@ -12,6 +12,7 @@ from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
 from app.personal_configs import create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
+from app.referrals import get_known_username, get_user_id_by_username, upsert_username
 from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
 from app.texts import (
@@ -179,6 +180,8 @@ def _build_admin_help_lines() -> list[str]:
     return [
         "🛠 Админ-команды",
         "",
+        "/allusers — username подключённых пользователей",
+        "/sms <username> <text|config_id> — отправить сообщение или конфиг",
         "/allstatb — статистика бесплатных VPN",
         "/allstatp — статистика платных VPN",
         "/allstatpers — статистика персональных конфигов",
@@ -188,6 +191,29 @@ def _build_admin_help_lines() -> list[str]:
         "/profile_reset — сбросить личный VPN-профиль",
         "/clear_chat — очистить чат",
     ]
+
+
+async def _resolve_user_id_by_username(message: Message, username: str) -> int | None:
+    normalized = username.strip().lstrip("@")
+    if not normalized:
+        return None
+
+    user_id = get_user_id_by_username(normalized)
+    if user_id is not None:
+        return user_id
+
+    try:
+        chat = await message.bot.get_chat(f"@{normalized}")
+        resolved_id = getattr(chat, "id", None)
+        if isinstance(resolved_id, int):
+            chat_username = getattr(chat, "username", None)
+            if isinstance(chat_username, str) and chat_username:
+                upsert_username(resolved_id, chat_username)
+            return resolved_id
+    except Exception:
+        return None
+
+    return None
 
 
 def _mini_app_text_with_fallback() -> str:
@@ -437,3 +463,85 @@ async def delete_personal_config_command(message: Message, command: CommandObjec
 @router.message(Command(commands=["ahelp"]), F.func(_is_owner))
 async def admin_help(message: Message) -> None:
     await _send_lines_report(message, _build_admin_help_lines())
+
+
+@router.message(Command(commands=["allusers"]), F.func(_is_owner))
+async def all_users(message: Message) -> None:
+    active_free = list_active_free_access_records()
+    active_paid = list_active_subscriptions()
+    peer_endpoints = list_peer_endpoints()
+
+    connected_user_ids: set[int] = set()
+    candidate_ids = set(active_free.keys()) | set(active_paid.keys())
+
+    for user_id in candidate_ids:
+        profile = get_wireguard_profile(user_id)
+        if profile is None:
+            continue
+        endpoint = peer_endpoints.get(profile.get("public_key", ""))
+        endpoint_ip = _endpoint_to_ip(endpoint)
+        if endpoint_ip != "-":
+            connected_user_ids.add(user_id)
+
+    if not connected_user_ids:
+        await message.answer("Подключённых пользователей сейчас нет")
+        return
+
+    rows: list[str] = ["👥 Подключённые пользователи", ""]
+    for user_id in sorted(connected_user_ids):
+        username = get_known_username(user_id)
+        if not username:
+            try:
+                chat = await message.bot.get_chat(user_id)
+                chat_username = getattr(chat, "username", None)
+                if isinstance(chat_username, str) and chat_username:
+                    username = chat_username
+                    upsert_username(user_id, chat_username)
+            except Exception:
+                username = None
+
+        label = f"@{username}" if isinstance(username, str) and username else "@unknown"
+        rows.append(f"{label} | id={user_id}")
+
+    await _send_lines_report(message, rows)
+
+
+@router.message(Command(commands=["sms"]), F.func(_is_owner))
+async def sms_command(message: Message, command: CommandObject | None = None) -> None:
+    args_raw = (command.args or "").strip() if command else ""
+    if not args_raw:
+        await message.answer("Формат: /sms <username> <сообщение_или_config_id>\nПример: /sms A1KKK6 привет")
+        return
+
+    parts = args_raw.split(maxsplit=1)
+    if len(parts) != 2:
+        await message.answer("Нужно указать username и текст/ID конфига")
+        return
+
+    username_arg, payload = parts[0], parts[1].strip()
+    if not payload:
+        await message.answer("Пустое сообщение")
+        return
+
+    target_user_id = await _resolve_user_id_by_username(message, username_arg)
+    if target_user_id is None:
+        await message.answer(f"Пользователь {username_arg} не найден")
+        return
+
+    all_personal = list_personal_configs()
+    config_record = next((item for item in all_personal if item.get("config_id") == payload), None)
+
+    try:
+        if config_record is not None:
+            await message.bot.send_document(
+                target_user_id,
+                BufferedInputFile(config_record["config_text"].encode("utf-8"), filename=config_record["config_filename"]),
+                caption=f"Персональный конфиг {config_record['config_id']} | до {_fmt_dt(config_record['expires_at'])}",
+            )
+            await message.answer(f"Конфиг {config_record['config_id']} отправлен @{username_arg.lstrip('@')}")
+        else:
+            await message.bot.send_message(target_user_id, payload)
+            await message.answer(f"Сообщение отправлено @{username_arg.lstrip('@')}")
+    except Exception:
+        logging.exception("Failed to send sms command payload to user_id=%s", target_user_id)
+        await message.answer("Не удалось отправить сообщение/конфиг")

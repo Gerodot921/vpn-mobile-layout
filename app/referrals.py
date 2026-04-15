@@ -139,6 +139,41 @@ def upsert_username(user_id: int, username: str | None) -> None:
         _save_state(state)
 
 
+def get_user_id_by_username(username: str) -> int | None:
+    normalized = username.strip().lstrip("@").lower()
+    if not normalized:
+        return None
+
+    with _state_lock:
+        state = _load_state()
+
+    for user_key, data in state.items():
+        saved_username = data.get("username", "")
+        if not isinstance(saved_username, str) or not saved_username:
+            continue
+        if saved_username.strip().lstrip("@").lower() == normalized:
+            try:
+                return int(user_key)
+            except Exception:
+                return None
+
+    return None
+
+
+def get_known_username(user_id: int) -> str | None:
+    with _state_lock:
+        state = _load_state()
+        record = state.get(_user_key(user_id))
+
+    if not isinstance(record, dict):
+        return None
+
+    username = record.get("username", "")
+    if isinstance(username, str) and username.strip():
+        return username.strip().lstrip("@")
+    return None
+
+
 def parse_referrer_id(payload: str | None) -> int | None:
     if not payload or not payload.startswith("ref_"):
         return None
