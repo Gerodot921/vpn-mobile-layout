@@ -108,6 +108,9 @@ const state = {
     activated: false,
     invites: [],
   },
+  adSessionToken: null,
+  adWatchSeconds: REWARD_WATCH_SECONDS,
+  adAssetUrl: "",
 };
 
 let freeServerAdInProgress = false;
@@ -484,15 +487,84 @@ function syncFreeAccessPanel() {
 
 
 function openRewardAd() {
-  state.rewardReadyAt = Date.now() + REWARD_WATCH_SECONDS * 1000;
-  saveRewardTimerState();
-  syncFreeAccessPanel();
+  void startRewardAdFlow();
+}
 
-  if (REWARD_AD_URL) {
-    window.open(REWARD_AD_URL, "_blank", "noopener,noreferrer");
+
+async function requestAdSession() {
+  if (!tg?.initData) {
+    throw new Error("Откройте Mini App внутри Telegram");
   }
 
-  showToast("Реклама открыта. После просмотра получите профиль на 1 час.");
+  const response = await fetch("/api/ad/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ initData: tg.initData }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "Не удалось запустить рекламу");
+  }
+
+  return data;
+}
+
+
+async function completeAdSession() {
+  if (!tg?.initData) {
+    throw new Error("Откройте Mini App внутри Telegram");
+  }
+  if (!state.adSessionToken) {
+    throw new Error("Сессия рекламы не найдена");
+  }
+
+  const response = await fetch("/api/ad/complete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      initData: tg.initData,
+      sessionToken: state.adSessionToken,
+      watchedSeconds: state.adWatchSeconds,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "Просмотр рекламы не подтвержден");
+  }
+}
+
+
+async function startRewardAdFlow() {
+  try {
+    const data = await requestAdSession();
+    const ad = data?.ad || {};
+    const watchSeconds = Number(ad.duration_sec || REWARD_WATCH_SECONDS);
+
+    state.adSessionToken = data?.session_token || null;
+    state.adWatchSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0
+      ? watchSeconds
+      : REWARD_WATCH_SECONDS;
+    state.adAssetUrl = typeof ad.asset_url === "string" ? ad.asset_url : "";
+
+    state.rewardReadyAt = Date.now() + state.adWatchSeconds * 1000;
+    saveRewardTimerState();
+    syncFreeAccessPanel();
+
+    const targetUrl = state.adAssetUrl || REWARD_AD_URL;
+    if (targetUrl) {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    }
+
+    showToast("Реклама открыта. После просмотра получите профиль на 1 час.");
+  } catch (error) {
+    showToast(error?.message || "Не удалось запустить рекламу");
+  }
 }
 
 
@@ -524,11 +596,21 @@ function claimFreeAccess() {
     showToast("Сначала досмотрите рекламу");
     return;
   }
+  if (!state.adSessionToken) {
+    showToast("Сначала запустите рекламу");
+    return;
+  }
 
   claimAccessBtn.disabled = true;
 
-  requestFreeAccess()
+  completeAdSession()
+    .then(() => requestFreeAccess())
     .then((data) => {
+      state.adSessionToken = null;
+      state.adWatchSeconds = REWARD_WATCH_SECONDS;
+      state.adAssetUrl = "";
+      state.rewardReadyAt = 0;
+      saveRewardTimerState();
       applyUserState(data);
       showToast("Бесплатный доступ активирован");
     })
@@ -546,37 +628,59 @@ async function startFreeServerAdFlow(server) {
   }
 
   freeServerAdInProgress = true;
-  state.rewardReadyAt = Date.now() + REWARD_WATCH_SECONDS * 1000;
-  saveRewardTimerState();
-  syncFreeAccessPanel();
+  try {
+    const data = await requestAdSession();
+    const ad = data?.ad || {};
+    const watchSeconds = Number(ad.duration_sec || REWARD_WATCH_SECONDS);
 
-  if (REWARD_AD_URL) {
-    window.open(REWARD_AD_URL, "_blank", "noopener,noreferrer");
-  }
+    state.adSessionToken = data?.session_token || null;
+    state.adWatchSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0
+      ? watchSeconds
+      : REWARD_WATCH_SECONDS;
+    state.adAssetUrl = typeof ad.asset_url === "string" ? ad.asset_url : "";
+    state.rewardReadyAt = Date.now() + state.adWatchSeconds * 1000;
+    saveRewardTimerState();
+    syncFreeAccessPanel();
 
-  showToast(`Реклама запущена на ${REWARD_WATCH_SECONDS} секунд`);
-
-  window.setTimeout(async () => {
-    try {
-      state.rewardReadyAt = 0;
-      saveRewardTimerState();
-
-      const data = await requestFreeAccess();
-      applyUserState(data);
-
-      state.serverIndex = serverConfigs.indexOf(server);
-      updateServerView();
-      renderServerList();
-
-      showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час.");
-    } catch (error) {
-      const message = error?.message || "Не удалось выдать доступ после рекламы";
-      showToast(message);
-    } finally {
-      freeServerAdInProgress = false;
-      syncFreeAccessPanel();
+    const targetUrl = state.adAssetUrl || REWARD_AD_URL;
+    if (targetUrl) {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
     }
-  }, REWARD_WATCH_SECONDS * 1000);
+
+    showToast(`Реклама запущена на ${state.adWatchSeconds} секунд`);
+
+    window.setTimeout(async () => {
+      try {
+        await completeAdSession();
+        state.rewardReadyAt = 0;
+        saveRewardTimerState();
+
+        const accessData = await requestFreeAccess();
+        state.adSessionToken = null;
+        state.adWatchSeconds = REWARD_WATCH_SECONDS;
+        state.adAssetUrl = "";
+        applyUserState(accessData);
+
+        state.serverIndex = serverConfigs.indexOf(server);
+        updateServerView();
+        renderServerList();
+
+        showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час.");
+      } catch (error) {
+        const message = error?.message || "Не удалось выдать доступ после рекламы";
+        showToast(message);
+      } finally {
+        freeServerAdInProgress = false;
+        syncFreeAccessPanel();
+      }
+    }, state.adWatchSeconds * 1000);
+  } catch (error) {
+    freeServerAdInProgress = false;
+    state.rewardReadyAt = 0;
+    saveRewardTimerState();
+    syncFreeAccessPanel();
+    showToast(error?.message || "Не удалось запустить рекламу");
+  }
 }
 
 

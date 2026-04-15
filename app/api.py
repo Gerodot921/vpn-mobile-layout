@@ -13,6 +13,7 @@ from aiohttp import web
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
 
+from app.ads import complete_ad_session, start_ad_session
 from app.free_access import (
     DEFAULT_FREE_ACCESS_HOURS,
     format_free_access_remaining_text,
@@ -300,10 +301,71 @@ async def claim_free_access(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
 
 
+async def ad_start(request: web.Request) -> web.Response:
+    try:
+        payload = await _read_request_json(request)
+        init_data = _init_data_from_payload(payload)
+        user_data = _extract_user(init_data)
+        user_id = int(user_data["id"])
+
+        ad, session_token = start_ad_session(user_id)
+        if ad is None or not session_token:
+            return web.json_response({"ok": False, "error": "No active ad"}, status=404)
+
+        return web.json_response(
+            {
+                "ok": True,
+                "session_token": session_token,
+                "ad": {
+                    "ad_id": ad.get("ad_id"),
+                    "title": ad.get("title"),
+                    "asset_url": ad.get("asset_url"),
+                    "click_url": ad.get("click_url"),
+                    "duration_sec": ad.get("duration_sec"),
+                },
+            }
+        )
+    except web.HTTPException as exc:
+        logging.warning("/api/ad/start failed: %s", exc.text)
+        return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
+    except Exception:
+        logging.exception("/api/ad/start unexpected error")
+        return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
+
+
+async def ad_complete(request: web.Request) -> web.Response:
+    try:
+        payload = await _read_request_json(request)
+        init_data = _init_data_from_payload(payload)
+        user_data = _extract_user(init_data)
+        user_id = int(user_data["id"])
+
+        session_token = str(payload.get("sessionToken", "")).strip()
+        watched_raw = payload.get("watchedSeconds", 0)
+        try:
+            watched_seconds = int(watched_raw)
+        except Exception:
+            watched_seconds = 0
+
+        ok, reason = complete_ad_session(user_id, session_token, watched_seconds)
+        if not ok:
+            return web.json_response({"ok": False, "error": reason}, status=400)
+
+        return web.json_response({"ok": True})
+    except web.HTTPException as exc:
+        logging.warning("/api/ad/complete failed: %s", exc.text)
+        return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
+    except Exception:
+        logging.exception("/api/ad/complete unexpected error")
+        return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
+
+
 def create_api_app(bot: Bot) -> web.Application:
     app = web.Application()
     app["bot"] = bot
     app.router.add_post("/api/user-state", user_state)
     app.router.add_post("/api/claim-free-access", claim_free_access)
+    app.router.add_post("/api/ad/start", ad_start)
+    app.router.add_post("/api/ad/complete", ad_complete)
     app.router.add_get("/healthz", lambda _request: web.json_response({"ok": True}))
     return app

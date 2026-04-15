@@ -8,6 +8,7 @@ from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
+from app.ads import get_ad_stats, set_active_ad, set_ad_active
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
@@ -189,6 +190,10 @@ def _build_admin_help_lines() -> list[str]:
         "/allstat — общая статистика по всем типам",
         "/create <n> <m> — создать n персональных конфигов на m дней",
         "/delete <config_id> — удалить персональный конфиг по ID",
+        "/adset <asset_url> [seconds] [click_url] — установить рекламу",
+        "/adon — включить рекламу",
+        "/adoff — выключить рекламу",
+        "/adstats — статистика рекламы",
         "/profile_reset — сбросить личный VPN-профиль",
         "/clear_chat — очистить чат",
     ]
@@ -581,3 +586,80 @@ async def sms_all_command(message: Message, command: CommandObject | None = None
     await message.answer(
         f"Рассылка завершена. Отправлено: {sent}. Ошибок: {failed}. Всего адресатов: {len(user_ids)}"
     )
+
+
+@router.message(Command(commands=["adset"]), F.func(_is_owner))
+async def ad_set_command(message: Message, command: CommandObject | None = None) -> None:
+    args = (command.args or "").split() if command else []
+    if len(args) < 1:
+        await message.answer(
+            "Формат: /adset <asset_url> [seconds] [click_url]\n"
+            "Пример: /adset https://cdn.example/ad.gif 30 https://example.com"
+        )
+        return
+
+    asset_url = args[0].strip()
+    duration_sec: int | None = None
+    click_url: str | None = None
+
+    if len(args) >= 2:
+        second = args[1].strip()
+        if second.isdigit():
+            duration_sec = int(second)
+            if len(args) >= 3:
+                click_url = args[2].strip()
+        else:
+            click_url = second
+
+    try:
+        ad = set_active_ad(
+            asset_url=asset_url,
+            click_url=click_url,
+            duration_sec=duration_sec,
+        )
+    except Exception:
+        await message.answer("Не удалось обновить рекламу. Проверьте аргументы команды.")
+        return
+
+    await message.answer(
+        "Реклама обновлена:\n"
+        f"asset: {ad.get('asset_url')}\n"
+        f"click: {ad.get('click_url')}\n"
+        f"seconds: {ad.get('duration_sec')}\n"
+        f"active: {ad.get('active')}"
+    )
+
+
+@router.message(Command(commands=["adon"]), F.func(_is_owner))
+async def ad_on_command(message: Message) -> None:
+    ad = set_ad_active(True)
+    await message.answer(f"Реклама включена. Текущий asset: {ad.get('asset_url')}")
+
+
+@router.message(Command(commands=["adoff"]), F.func(_is_owner))
+async def ad_off_command(message: Message) -> None:
+    ad = set_ad_active(False)
+    await message.answer(f"Реклама выключена. Текущий asset: {ad.get('asset_url')}")
+
+
+@router.message(Command(commands=["adstats"]), F.func(_is_owner))
+async def ad_stats_command(message: Message) -> None:
+    stats = get_ad_stats()
+    impressions = int(stats.get("impressions", 0) or 0)
+    completions = int(stats.get("completions", 0) or 0)
+    conversion = (completions / impressions * 100.0) if impressions > 0 else 0.0
+    ad = stats.get("active_ad") or {}
+
+    lines = [
+        "📣 Статистика рекламы",
+        "",
+        f"Показы (sessions): {impressions}",
+        f"Досмотры: {completions}",
+        f"Конверсия: {conversion:.1f}%",
+        "",
+        f"Активна: {bool(ad.get('active'))}",
+        f"asset: {ad.get('asset_url', '-')}",
+        f"click: {ad.get('click_url', '-')}",
+        f"seconds: {ad.get('duration_sec', '-')}",
+    ]
+    await _send_lines_report(message, lines)
