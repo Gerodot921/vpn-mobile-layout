@@ -92,6 +92,13 @@ const state = {
   freeAccessUntil: 0,
   freeAccessSource: null,
   freeAccessKey: null,
+  accessInfo: {
+    tier: "none",
+    keyTitle: "Нет доступа",
+    keyValue: null,
+    configName: null,
+    expiresAt: null,
+  },
   rewardReadyAt: 0,
   referral: {
     referrerId: null,
@@ -183,6 +190,26 @@ function formatDurationShort(totalMs) {
   }
 
   return "меньше минуты";
+}
+
+
+function formatDateTime(value) {
+  if (!value || typeof value !== "string") {
+    return "-";
+  }
+
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return value;
+  }
+
+  return new Date(parsed).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function statusClassByType(type) {
@@ -360,54 +387,67 @@ function syncFreeAccessPanel() {
   const now = Date.now();
   const accessRemaining = state.freeAccessUntil - now;
   const rewardRemaining = state.rewardReadyAt - now;
+  const info = state.accessInfo || {};
+
+  const keyTitle = typeof info.keyTitle === "string" && info.keyTitle ? info.keyTitle : "Нет доступа";
+  const keyValue = typeof info.keyValue === "string" && info.keyValue ? info.keyValue : null;
+  const configName = typeof info.configName === "string" && info.configName ? info.configName : "-";
+  const expiresText = formatDateTime(info.expiresAt);
+
+  if (keyValue) {
+    freeAccessValue.textContent = `🔑 ${keyTitle}: ${keyValue}`;
+  } else {
+    freeAccessValue.textContent = `🔑 ${keyTitle}`;
+  }
+  freeAccessValue.classList.remove("copyable");
+  freeAccessValue.disabled = true;
+  freeAccessValue.title = "";
+
+  rewardStatus.textContent = `Конфиг: ${configName}`;
+  rewardTimer.textContent = `Действует до: ${expiresText}`;
+
+  if (info && info.tier && info.tier !== "none") {
+    watchAdBtn.classList.add("hidden");
+    claimAccessBtn.classList.add("hidden");
+    return;
+  }
 
   if (accessRemaining > 0) {
-    if (state.freeAccessKey) {
-      freeAccessValue.textContent = `🔑 ${state.freeAccessKey}`;
-      freeAccessValue.classList.add("copyable");
-      freeAccessValue.disabled = false;
-      freeAccessValue.title = "Нажмите, чтобы скопировать";
-    } else {
-      freeAccessValue.textContent = `🔑 ${formatDurationShort(accessRemaining)}`;
-      freeAccessValue.classList.remove("copyable");
-      freeAccessValue.disabled = true;
-      freeAccessValue.title = "";
+    if (!info || info.tier === "none") {
+      if (state.freeAccessKey) {
+        freeAccessValue.textContent = `🔑 Бесплатный: ${state.freeAccessKey}`;
+      } else {
+        freeAccessValue.textContent = "🔑 Бесплатный";
+      }
+      rewardStatus.textContent = "Конфиг: free-access";
+      rewardTimer.textContent = `Действует до: ${formatDateTime(new Date(now + accessRemaining).toISOString())}`;
     }
-    if (state.freeAccessSource === "referral") {
-      rewardStatus.textContent = "Вы пришли по приглашению. Реклама не нужна.";
-    } else {
-      rewardStatus.textContent = "Профиль активен. Выберите бесплатный сервер и подключайтесь.";
-    }
-    rewardTimer.textContent = `Доступ действует ещё ${formatDurationShort(accessRemaining)}.`;
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.add("hidden");
   } else if (rewardRemaining > 0) {
-    freeAccessValue.textContent = "🔒 Не активирован";
-    freeAccessValue.classList.remove("copyable");
-    freeAccessValue.disabled = true;
-    freeAccessValue.title = "";
-    rewardStatus.textContent = "Реклама просмотрена. Заберите профиль после таймера.";
-    rewardTimer.textContent = `Можно получить профиль через ${formatDurationShort(rewardRemaining)}.`;
+    if (!info || info.tier === "none") {
+      freeAccessValue.textContent = "🔒 Нет доступа";
+      rewardStatus.textContent = "Реклама просмотрена. Заберите профиль после таймера.";
+      rewardTimer.textContent = `Можно получить профиль через ${formatDurationShort(rewardRemaining)}.`;
+    }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
     claimAccessBtn.disabled = true;
   } else if (state.rewardReadyAt > 0) {
-    freeAccessValue.textContent = "🔒 Не активирован";
-    freeAccessValue.classList.remove("copyable");
-    freeAccessValue.disabled = true;
-    freeAccessValue.title = "";
-    rewardStatus.textContent = "Реклама просмотрена. Профиль можно забрать.";
-    rewardTimer.textContent = "Нажмите кнопку получения профиля.";
+    if (!info || info.tier === "none") {
+      freeAccessValue.textContent = "🔒 Нет доступа";
+      rewardStatus.textContent = "Реклама просмотрена. Профиль можно забрать.";
+      rewardTimer.textContent = "Нажмите кнопку получения профиля.";
+    }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
     claimAccessBtn.disabled = false;
   } else {
-    freeAccessValue.textContent = "🔒 Не активирован";
-    freeAccessValue.classList.remove("copyable");
-    freeAccessValue.disabled = true;
-    freeAccessValue.title = "";
-    rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите профиль WireGuard на 1 час.";
-    rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения профиля.";
+    if (!info || info.tier === "none") {
+      freeAccessValue.textContent = "🔒 Нет доступа";
+      rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите профиль WireGuard на 1 час.";
+      rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения профиля.";
+    }
     watchAdBtn.classList.remove("hidden");
     claimAccessBtn.classList.add("hidden");
   }
@@ -526,6 +566,18 @@ function applyUserState(payload) {
   state.freeAccessUntil = freeAccess.expires_at ? Date.parse(freeAccess.expires_at) || 0 : 0;
   state.freeAccessSource = freeAccess.source || null;
   state.freeAccessKey = freeAccess.access_key || null;
+
+  const paidSubscription = payload.paid_subscription || {};
+  state.hasSubscription = Boolean(paidSubscription.active);
+
+  const accessInfo = payload.access_info || {};
+  state.accessInfo = {
+    tier: accessInfo.tier || "none",
+    keyTitle: accessInfo.key_title || "Нет доступа",
+    keyValue: accessInfo.key_value || null,
+    configName: accessInfo.config_name || null,
+    expiresAt: accessInfo.expires_at || null,
+  };
 
   updateReferralStats();
   syncFreeAccessPanel();

@@ -100,6 +100,17 @@ body {
   border-color: rgba(0, 211, 167, 0.22);
 }
 
+.reward-panel .state-hint {
+  margin-bottom: 6px;
+  font-weight: 700;
+  color: #d4e7ff;
+}
+
+.reward-panel .tiny-note {
+  margin-bottom: 10px;
+  color: #9ec2ea;
+}
+
 .panel h2 {
   margin: 0 0 10px;
   font-size: 16px;

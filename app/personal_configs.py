@@ -39,6 +39,9 @@ class PersonalConfigRecord(TypedDict):
     expires_at: str
     added_to_server: bool
     revoked_at: str | None
+    assigned_user_id: int | None
+    assigned_username: str | None
+    assigned_at: str | None
 
 
 PersonalConfigsState = dict[str, PersonalConfigRecord]
@@ -76,6 +79,9 @@ def _load_state() -> PersonalConfigsState:
         expires_at = value.get("expires_at")
         added_to_server = value.get("added_to_server", False)
         revoked_at = value.get("revoked_at")
+        assigned_user_id = value.get("assigned_user_id")
+        assigned_username = value.get("assigned_username")
+        assigned_at = value.get("assigned_at")
 
         if not all(isinstance(item, str) for item in [
             config_id,
@@ -102,6 +108,9 @@ def _load_state() -> PersonalConfigsState:
             "expires_at": expires_at,
             "added_to_server": bool(added_to_server),
             "revoked_at": revoked_at if isinstance(revoked_at, str) else None,
+            "assigned_user_id": assigned_user_id if isinstance(assigned_user_id, int) else None,
+            "assigned_username": assigned_username if isinstance(assigned_username, str) and assigned_username else None,
+            "assigned_at": assigned_at if isinstance(assigned_at, str) and assigned_at else None,
         }
 
     return state
@@ -353,6 +362,51 @@ def delete_personal_config(config_id: str) -> PersonalConfigRecord | None:
         return record
 
 
+def assign_personal_config_to_user(config_id: str, user_id: int, username: str | None = None) -> bool:
+    config_id = config_id.strip()
+    if not config_id:
+        return False
+
+    with _state_lock:
+        state = _load_state()
+        record = state.get(config_id)
+        if record is None:
+            return False
+
+        record["assigned_user_id"] = user_id
+        record["assigned_username"] = username.strip().lstrip("@") if isinstance(username, str) and username.strip() else None
+        record["assigned_at"] = _now_utc().isoformat()
+        state[config_id] = record
+        _save_state(state)
+
+    return True
+
+
+def get_active_personal_config_for_user(user_id: int) -> PersonalConfigRecord | None:
+    now = _now_utc()
+    with _state_lock:
+        state = _load_state()
+
+    candidates: list[PersonalConfigRecord] = []
+    for record in state.values():
+        if record.get("assigned_user_id") != user_id:
+            continue
+        if record.get("revoked_at"):
+            continue
+        try:
+            if _parse_dt(record["expires_at"]) <= now:
+                continue
+        except Exception:
+            continue
+        candidates.append(record)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item.get("expires_at", ""), reverse=True)
+    return candidates[0]
+
+
 def create_personal_configs(count: int, days: int) -> list[PersonalConfigRecord]:
     count = max(1, min(count, 100))
     days = max(1, min(days, 3650))
@@ -394,6 +448,9 @@ def create_personal_configs(count: int, days: int) -> list[PersonalConfigRecord]
                 "expires_at": expires_at,
                 "added_to_server": bool(added_to_server),
                 "revoked_at": None,
+                "assigned_user_id": None,
+                "assigned_username": None,
+                "assigned_at": None,
             }
             state[config_id] = record
             created.append(record)

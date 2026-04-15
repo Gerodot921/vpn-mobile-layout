@@ -11,7 +11,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
-from app.personal_configs import create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
+from app.personal_configs import assign_personal_config_to_user, create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, upsert_username
 from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
@@ -539,6 +539,7 @@ async def sms_command(message: Message, command: CommandObject | None = None) ->
                 BufferedInputFile(config_record["config_text"].encode("utf-8"), filename=config_record["config_filename"]),
                 caption=f"Персональный конфиг {config_record['config_id']} | до {_fmt_dt(config_record['expires_at'])}",
             )
+            assign_personal_config_to_user(config_record["config_id"], target_user_id, username_arg)
             await message.answer(f"Конфиг {config_record['config_id']} отправлен @{username_arg.lstrip('@')}")
         else:
             await message.bot.send_message(target_user_id, payload)

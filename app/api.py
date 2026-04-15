@@ -22,9 +22,10 @@ from app.free_access import (
     mark_free_access_peer_added,
 )
 from app.referrals import ensure_user, get_referral_invites, upsert_username
+from app.personal_configs import get_active_personal_config_for_user
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.wireguard import ensure_wireguard_profile
-from app.subscriptions import get_remaining_text, get_subscription_plan_name
+from app.subscriptions import get_remaining_text, get_subscription_plan_name, get_subscription_record, is_subscription_active
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
 
 
@@ -97,9 +98,45 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
     free_record = get_free_access_record(user_id)
     paid_remaining = get_remaining_text(user_id)
     paid_plan_name = get_subscription_plan_name(user_id)
+    paid_record = get_subscription_record(user_id)
+    paid_active = is_subscription_active(user_id)
+    personal_record = get_active_personal_config_for_user(user_id)
 
     free_active = is_free_access_active(user_id)
     free_remaining = format_free_access_remaining_text(user_id) if free_active else "0"
+
+    access_info: dict[str, Any] = {
+        "tier": "none",
+        "key_title": "Нет доступа",
+        "key_value": None,
+        "config_name": None,
+        "expires_at": None,
+    }
+
+    if personal_record is not None:
+        access_info = {
+            "tier": "blatnoy",
+            "key_title": "Блатной",
+            "key_value": personal_record.get("config_id"),
+            "config_name": personal_record.get("config_filename"),
+            "expires_at": personal_record.get("expires_at"),
+        }
+    elif free_active and free_record is not None:
+        access_info = {
+            "tier": "free",
+            "key_title": "Бесплатный",
+            "key_value": free_record.get("access_key"),
+            "config_name": free_record.get("vpn_config_name"),
+            "expires_at": free_record.get("expires_at"),
+        }
+    elif paid_active and paid_record is not None:
+        access_info = {
+            "tier": "paid",
+            "key_title": "Платный",
+            "key_value": paid_record.get("plan_name", paid_plan_name),
+            "config_name": "paid-subscription",
+            "expires_at": paid_record.get("expires_at"),
+        }
 
     return {
         "ok": True,
@@ -130,7 +167,10 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
         "paid_subscription": {
             "plan_name": paid_plan_name,
             "remaining_text": paid_remaining,
+            "expires_at": paid_record["expires_at"] if paid_record else None,
+            "active": paid_active,
         },
+        "access_info": access_info,
     }
 
 

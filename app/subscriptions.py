@@ -188,6 +188,44 @@ def get_subscription_plan_name(user_id: int) -> str:
     return plan_name if isinstance(plan_name, str) and plan_name else "Базовый"
 
 
+def get_subscription_record(user_id: int) -> SubscriptionRecord | None:
+    state = _load_state()
+    record = state.get(str(user_id))
+    if not isinstance(record, dict):
+        return None
+    return record
+
+
+def is_subscription_active(user_id: int) -> bool:
+    record = get_subscription_record(user_id)
+    if record is None:
+        return False
+
+    try:
+        return _parse_expires_at(record["expires_at"]) > _now_utc()
+    except Exception:
+        return False
+
+
+def get_subscription_record(user_id: int) -> SubscriptionRecord | None:
+    state = _load_state()
+    record = state.get(str(user_id))
+    if not isinstance(record, dict):
+        return None
+    return record
+
+
+def is_subscription_active(user_id: int) -> bool:
+    record = get_subscription_record(user_id)
+    if record is None:
+        return False
+
+    try:
+        return _parse_expires_at(record["expires_at"]) > _now_utc()
+    except Exception:
+        return False
+
+
 def list_active_subscriptions() -> dict[int, SubscriptionRecord]:
     now = _now_utc()
     active: dict[int, SubscriptionRecord] = {}
