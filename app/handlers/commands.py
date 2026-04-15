@@ -1,16 +1,17 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramRetryAfter
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
+from app.personal_configs import create_personal_configs, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
 from app.texts import (
@@ -63,6 +64,120 @@ def _endpoint_to_ip(endpoint: str | None) -> str:
 
     # Fallback for unexpected formats.
     return endpoint
+
+
+async def _build_free_stats_lines(message: Message) -> list[str]:
+    active_free = list_active_free_access_records()
+    peer_endpoints = list_peer_endpoints()
+
+    lines: list[str] = []
+    lines.append("🟢 Статистика бесплатных VPN")
+    lines.append("")
+    lines.append(f"Бесплатный конфиг получали (раз): {get_total_free_claims()}")
+    lines.append(f"Пользовались бесплатным конфигом (уникальных): {get_total_free_users()}")
+    lines.append(f"Активных бесплатных: {len(active_free)}")
+    lines.append("")
+
+    if not active_free:
+        lines.append("Нет активных")
+        return lines
+
+    for user_id, record in sorted(active_free.items(), key=lambda item: item[1].get("expires_at", "")):
+        user_label = await _resolve_user_label(message, user_id)
+        config_name = record.get("vpn_config_name") or "-"
+        expires_at = _fmt_dt(record.get("expires_at", "-"))
+        profile = get_wireguard_profile(user_id)
+        public_key = profile.get("public_key", "") if profile else ""
+        endpoint_ip = _endpoint_to_ip(peer_endpoints.get(public_key))
+        lines.append(f"{user_label} | id={user_id} | ip={endpoint_ip} | config={config_name} | до={expires_at}")
+
+    return lines
+
+
+async def _build_paid_stats_lines(message: Message) -> list[str]:
+    active_paid = list_active_subscriptions()
+    peer_endpoints = list_peer_endpoints()
+
+    lines: list[str] = []
+    lines.append("💎 Статистика платных VPN")
+    lines.append("")
+    lines.append(f"Активных платных: {len(active_paid)}")
+    lines.append("")
+
+    if not active_paid:
+        lines.append("Нет активных")
+        return lines
+
+    for user_id, record in sorted(active_paid.items(), key=lambda item: item[1].get("expires_at", "")):
+        user_label = await _resolve_user_label(message, user_id)
+        profile = get_wireguard_profile(user_id)
+        config_name = profile.get("config_filename", "-") if profile else "-"
+        public_key = profile.get("public_key", "") if profile else ""
+        endpoint_ip = _endpoint_to_ip(peer_endpoints.get(public_key))
+        expires_at = _fmt_dt(record.get("expires_at", "-"))
+        lines.append(f"{user_label} | id={user_id} | ip={endpoint_ip} | config={config_name} | до={expires_at}")
+
+    return lines
+
+
+def _build_personal_stats_lines() -> list[str]:
+    revoked = revoke_expired_personal_configs()
+    all_configs = list_personal_configs()
+    active = list_active_personal_configs()
+    peer_endpoints = list_peer_endpoints()
+
+    lines: list[str] = []
+    lines.append("🧩 Статистика персональных конфигов")
+    lines.append("")
+    lines.append(f"Всего персональных: {len(all_configs)}")
+    lines.append(f"Активных персональных: {len(active)}")
+    lines.append(f"Авто-отозвано по сроку сейчас: {revoked}")
+    lines.append("")
+
+    if not all_configs:
+        lines.append("Нет созданных персональных конфигов")
+        return lines
+
+    for record in sorted(all_configs, key=lambda item: item.get("expires_at", "")):
+        status = "active"
+        revoked_at = record.get("revoked_at")
+        expires_at_raw = record.get("expires_at", "")
+        try:
+            if revoked_at:
+                status = "revoked"
+            else:
+                expires_dt = datetime.fromisoformat(expires_at_raw)
+                if expires_dt.tzinfo is None:
+                    expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+                else:
+                    expires_dt = expires_dt.astimezone(timezone.utc)
+                if expires_dt <= datetime.now(timezone.utc):
+                    status = "expired"
+        except Exception:
+            pass
+
+        endpoint_ip = _endpoint_to_ip(peer_endpoints.get(record.get("public_key", "")))
+        lines.append(
+            "{cfg} | ip={ip} | status={status} | до={exp}".format(
+                cfg=record.get("config_filename", "-"),
+                ip=endpoint_ip,
+                status=status,
+                exp=_fmt_dt(record.get("expires_at", "-")),
+            )
+        )
+
+    return lines
+
+
+async def _send_lines_report(message: Message, lines: list[str]) -> None:
+    report = "\n".join(lines)
+    if len(report) <= 3900:
+        await message.answer(report)
+        return
+
+    for start in range(0, len(lines), 45):
+        chunk = "\n".join(lines[start:start + 45])
+        await message.answer(chunk)
 
 
 def _mini_app_text_with_fallback() -> str:
@@ -244,3 +359,49 @@ async def all_stat(message: Message) -> None:
     for start in range(0, len(lines), 45):
         chunk = "\n".join(lines[start:start + 45])
         await message.answer(chunk)
+
+
+@router.message(Command(commands=["allstatb"]), F.func(_is_owner))
+async def all_stat_free(message: Message) -> None:
+    await _send_lines_report(message, await _build_free_stats_lines(message))
+
+
+@router.message(Command(commands=["allstatp"]), F.func(_is_owner))
+async def all_stat_paid(message: Message) -> None:
+    await _send_lines_report(message, await _build_paid_stats_lines(message))
+
+
+@router.message(Command(commands=["allstatpers"]), F.func(_is_owner))
+async def all_stat_personal(message: Message) -> None:
+    await _send_lines_report(message, _build_personal_stats_lines())
+
+
+@router.message(Command(commands=["create_n_m"]), F.func(_is_owner))
+async def create_n_m(message: Message, command: CommandObject | None = None) -> None:
+    args = (command.args or "").split() if command else []
+    if len(args) != 2:
+        await message.answer("Формат: /create_n_m <кол-во_конфигов> <кол-во_дней>\nПример: /create_n_m 3 30")
+        return
+
+    try:
+        count = int(args[0])
+        days = int(args[1])
+    except Exception:
+        await message.answer("n и m должны быть числами. Пример: /create_n_m 3 30")
+        return
+
+    if count <= 0 or days <= 0:
+        await message.answer("n и m должны быть больше 0")
+        return
+
+    records = create_personal_configs(count=count, days=days)
+    await message.answer(f"Создано персональных конфигов: {len(records)} (срок: {days} дн.)")
+
+    for record in records:
+        try:
+            await message.answer_document(
+                BufferedInputFile(record["config_text"].encode("utf-8"), filename=record["config_filename"]),
+                caption=f"{record['config_id']} | до {_fmt_dt(record['expires_at'])}",
+            )
+        except Exception:
+            logging.exception("Failed to send personal config %s", record.get("config_id", "-"))

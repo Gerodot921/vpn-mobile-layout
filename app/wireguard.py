@@ -467,6 +467,24 @@ def add_peer_to_server(user_id: int) -> bool:
         logging.warning("No WireGuard profile found for user_id=%s", user_id)
         return False
 
+    return add_peer_to_server_by_values(
+        public_key=profile["public_key"],
+        client_address=profile["address"],
+        client_preshared_key=profile.get("preshared_key", ""),
+        user_id=user_id,
+    )
+
+
+def add_peer_to_server_by_values(
+    public_key: str,
+    client_address: str,
+    client_preshared_key: str,
+    user_id: int = 0,
+) -> bool:
+    """Add a WireGuard peer to server using explicit peer values."""
+    if not public_key or not client_address:
+        return False
+
     docker_bin, docker_container, interface_name = _docker_container_and_iface()
 
     if not docker_container:
@@ -477,9 +495,7 @@ def add_peer_to_server(user_id: int) -> bool:
         logging.error("Docker executable was not found. Set WIREGUARD_DOCKER_BIN=/usr/bin/docker")
         return False
 
-    client_public_key = profile["public_key"]
-    client_address = profile["address"]
-    client_preshared_key = profile.get("preshared_key", "")
+    client_public_key = public_key
 
     if client_preshared_key:
         cmd = [
