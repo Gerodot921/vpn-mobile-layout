@@ -272,7 +272,7 @@ function renderByMode() {
     statusTitle.textContent = "Защита не активна";
     statusSubtitle.textContent = "Подключитесь к VPN через Amnezia";
     stateHint.textContent = "Нажмите кнопку ниже, чтобы открыть Amnezia.";
-    setChip("status-red", "🔴 VPN не обнаружен");
+    setChip("status-red", "VPN не подключён");
     connectBtn.classList.remove("hidden");
     connectHint.classList.remove("hidden");
     return;
@@ -282,7 +282,7 @@ function renderByMode() {
     statusTitle.textContent = "Ожидаем подключение";
     statusSubtitle.textContent = "Подтвердите импорт конфигурации в Amnezia";
     stateHint.textContent = "После подключения нажмите «Проверить подключение».";
-    setChip("status-yellow", "⏳ Ожидаем подключение...");
+    setChip("status-red", "VPN не подключён");
     openAgainBtn.classList.remove("hidden");
     checkBtn.classList.remove("hidden");
     return;
@@ -293,7 +293,7 @@ function renderByMode() {
     const location = state.connectedCountry || currentServer().name;
     statusSubtitle.textContent = `Соединение активно через ${location}`;
     stateHint.textContent = "Трафик идет через VPN-профиль Amnezia.";
-    setChip("status-green", "🟢 Вы защищены");
+    setChip("status-green", "VPN подключён");
     disconnectBtn.classList.remove("hidden");
     return;
   }
@@ -302,7 +302,7 @@ function renderByMode() {
     statusTitle.textContent = "Приложение Amnezia не найдено";
     statusSubtitle.textContent = "Установите Amnezia и повторите подключение";
     stateHint.textContent = "После установки вернитесь и нажмите «Подключиться».";
-    setChip("status-red", "🔴 Amnezia не обнаружена");
+    setChip("status-red", "VPN не подключён");
     installBtn.classList.remove("hidden");
     connectBtn.classList.remove("hidden");
     connectHint.classList.remove("hidden");
@@ -312,7 +312,7 @@ function renderByMode() {
   statusTitle.textContent = "VPN не обнаружен";
   statusSubtitle.textContent = "Завершите подключение в Amnezia";
   stateHint.textContent = state.checkErrorHint || "Откройте Amnezia повторно и проверьте подключение.";
-  setChip("status-red", "🔴 VPN не обнаружен");
+  setChip("status-red", "VPN не подключён");
   openAgainBtn.classList.remove("hidden");
   checkBtn.classList.remove("hidden");
 }

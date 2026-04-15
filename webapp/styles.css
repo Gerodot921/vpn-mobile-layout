@@ -127,25 +127,29 @@ body {
   border: 1px solid var(--line);
   border-radius: 999px;
   font-size: 11px;
+  font-weight: 800;
   line-height: 1;
-  color: var(--text);
-  padding: 4px 8px;
+  color: #ffffff;
+  padding: 5px 10px;
   white-space: nowrap;
+  transition: all 0.2s ease;
 }
 
 .status-green {
-  border-color: rgba(0, 211, 167, 0.6);
-  color: var(--accent);
+  border-color: rgba(0, 211, 167, 0.75);
+  background: rgba(0, 211, 167, 0.22);
+  box-shadow: 0 0 0 1px rgba(0, 211, 167, 0.15) inset;
 }
 
 .status-yellow {
   border-color: rgba(255, 215, 106, 0.6);
-  color: var(--warning);
+  background: rgba(255, 215, 106, 0.2);
 }
 
 .status-red {
-  border-color: rgba(255, 107, 122, 0.6);
-  color: var(--danger);
+  border-color: rgba(255, 107, 122, 0.75);
+  background: rgba(255, 107, 122, 0.22);
+  box-shadow: 0 0 0 1px rgba(255, 107, 122, 0.15) inset;
 }
 
 .state-hint {
