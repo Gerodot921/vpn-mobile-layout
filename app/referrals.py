@@ -174,6 +174,21 @@ def get_known_username(user_id: int) -> str | None:
     return None
 
 
+def list_known_user_ids() -> list[int]:
+    with _state_lock:
+        state = _load_state()
+
+    user_ids: list[int] = []
+    for user_key in state.keys():
+        try:
+            user_ids.append(int(user_key))
+        except Exception:
+            continue
+
+    user_ids.sort()
+    return user_ids
+
+
 def parse_referrer_id(payload: str | None) -> int | None:
     if not payload or not payload.startswith("ref_"):
         return None

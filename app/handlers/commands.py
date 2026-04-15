@@ -12,7 +12,7 @@ from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
 from app.personal_configs import create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
-from app.referrals import get_known_username, get_user_id_by_username, upsert_username
+from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, upsert_username
 from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
 from app.texts import (
@@ -182,6 +182,7 @@ def _build_admin_help_lines() -> list[str]:
         "",
         "/allusers — username подключённых пользователей",
         "/sms <username> <text|config_id> — отправить сообщение или конфиг",
+        "/smsall <text> — отправить текст всем пользователям",
         "/allstatb — статистика бесплатных VPN",
         "/allstatp — статистика платных VPN",
         "/allstatpers — статистика персональных конфигов",
@@ -545,3 +546,37 @@ async def sms_command(message: Message, command: CommandObject | None = None) ->
     except Exception:
         logging.exception("Failed to send sms command payload to user_id=%s", target_user_id)
         await message.answer("Не удалось отправить сообщение/конфиг")
+
+
+@router.message(Command(commands=["smsall"]), F.func(_is_owner))
+async def sms_all_command(message: Message, command: CommandObject | None = None) -> None:
+    text = (command.args or "").strip() if command else ""
+    if not text:
+        await message.answer("Формат: /smsall <текст_сообщения>")
+        return
+
+    user_ids = [user_id for user_id in list_known_user_ids() if user_id != OWNER_ID]
+    if not user_ids:
+        await message.answer("Нет пользователей для рассылки")
+        return
+
+    sent = 0
+    failed = 0
+
+    for user_id in user_ids:
+        try:
+            await message.bot.send_message(user_id, text)
+            sent += 1
+        except TelegramRetryAfter as exc:
+            await asyncio.sleep(float(exc.retry_after) + 0.1)
+            try:
+                await message.bot.send_message(user_id, text)
+                sent += 1
+            except Exception:
+                failed += 1
+        except Exception:
+            failed += 1
+
+    await message.answer(
+        f"Рассылка завершена. Отправлено: {sent}. Ошибок: {failed}. Всего адресатов: {len(user_ids)}"
+    )
