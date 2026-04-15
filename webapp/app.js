@@ -160,6 +160,11 @@ function hasFreeAccess() {
 }
 
 
+function hasVpnAccess() {
+  return hasFreeAccess() || hasPaidAccess();
+}
+
+
 function formatDurationShort(totalMs) {
   const safeMs = Math.max(0, Math.floor(totalMs));
   const totalSeconds = Math.floor(safeMs / 1000);
@@ -272,7 +277,7 @@ function renderByMode() {
     statusTitle.textContent = "Защита не активна";
     statusSubtitle.textContent = "Подключитесь к VPN через Amnezia";
     stateHint.textContent = "Нажмите кнопку ниже, чтобы открыть Amnezia.";
-    setChip("status-red", "VPN не подключён");
+    setChip(hasVpnAccess() ? "status-green" : "status-red", hasVpnAccess() ? "VPN подключён" : "VPN не подключён");
     connectBtn.classList.remove("hidden");
     connectHint.classList.remove("hidden");
     return;
@@ -282,7 +287,7 @@ function renderByMode() {
     statusTitle.textContent = "Ожидаем подключение";
     statusSubtitle.textContent = "Подтвердите импорт конфигурации в Amnezia";
     stateHint.textContent = "После подключения нажмите «Проверить подключение».";
-    setChip("status-red", "VPN не подключён");
+    setChip(hasVpnAccess() ? "status-green" : "status-red", hasVpnAccess() ? "VPN подключён" : "VPN не подключён");
     openAgainBtn.classList.remove("hidden");
     checkBtn.classList.remove("hidden");
     return;
@@ -302,7 +307,7 @@ function renderByMode() {
     statusTitle.textContent = "Приложение Amnezia не найдено";
     statusSubtitle.textContent = "Установите Amnezia и повторите подключение";
     stateHint.textContent = "После установки вернитесь и нажмите «Подключиться».";
-    setChip("status-red", "VPN не подключён");
+    setChip(hasVpnAccess() ? "status-green" : "status-red", hasVpnAccess() ? "VPN подключён" : "VPN не подключён");
     installBtn.classList.remove("hidden");
     connectBtn.classList.remove("hidden");
     connectHint.classList.remove("hidden");
@@ -312,7 +317,7 @@ function renderByMode() {
   statusTitle.textContent = "VPN не обнаружен";
   statusSubtitle.textContent = "Завершите подключение в Amnezia";
   stateHint.textContent = state.checkErrorHint || "Откройте Amnezia повторно и проверьте подключение.";
-  setChip("status-red", "VPN не подключён");
+  setChip(hasVpnAccess() ? "status-green" : "status-red", hasVpnAccess() ? "VPN подключён" : "VPN не подключён");
   openAgainBtn.classList.remove("hidden");
   checkBtn.classList.remove("hidden");
 }
@@ -525,6 +530,7 @@ function applyUserState(payload) {
   updateReferralStats();
   syncFreeAccessPanel();
   renderServerList();
+  renderByMode();
 }
 
 
