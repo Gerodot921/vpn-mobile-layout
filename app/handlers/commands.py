@@ -129,30 +129,26 @@ def _build_personal_stats_lines() -> list[str]:
     lines: list[str] = []
     lines.append("🧩 Статистика персональных конфигов")
     lines.append("")
-    lines.append(f"Всего персональных: {len(all_configs)}")
+    lines.append(f"Всего персональных (активных): {len(active)}")
     lines.append(f"Активных персональных: {len(active)}")
     lines.append(f"Авто-отозвано по сроку сейчас: {revoked}")
     lines.append("")
 
-    if not all_configs:
+    if not active:
         lines.append("Нет созданных персональных конфигов")
         return lines
 
-    for record in sorted(all_configs, key=lambda item: item.get("expires_at", "")):
+    for record in sorted(active, key=lambda item: item.get("expires_at", "")):
         status = "active"
-        revoked_at = record.get("revoked_at")
         expires_at_raw = record.get("expires_at", "")
         try:
-            if revoked_at:
-                status = "revoked"
+            expires_dt = datetime.fromisoformat(expires_at_raw)
+            if expires_dt.tzinfo is None:
+                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
             else:
-                expires_dt = datetime.fromisoformat(expires_at_raw)
-                if expires_dt.tzinfo is None:
-                    expires_dt = expires_dt.replace(tzinfo=timezone.utc)
-                else:
-                    expires_dt = expires_dt.astimezone(timezone.utc)
-                if expires_dt <= datetime.now(timezone.utc):
-                    status = "expired"
+                expires_dt = expires_dt.astimezone(timezone.utc)
+            if expires_dt <= datetime.now(timezone.utc):
+                status = "expired"
         except Exception:
             pass
 
