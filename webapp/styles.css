@@ -402,6 +402,26 @@ body {
   border-radius: 999px;
 }
 
+.reward-panel .value-inline {
+  border-color: rgba(149, 170, 199, 0.35);
+  background: rgba(149, 170, 199, 0.12);
+}
+
+.reward-panel .value-inline.tier-free {
+  border-color: rgba(0, 211, 167, 0.5);
+  background: rgba(0, 211, 167, 0.14);
+}
+
+.reward-panel .value-inline.tier-paid {
+  border-color: rgba(36, 165, 255, 0.55);
+  background: rgba(36, 165, 255, 0.16);
+}
+
+.reward-panel .value-inline.tier-blatnoy {
+  border-color: rgba(255, 215, 106, 0.6);
+  background: rgba(255, 215, 106, 0.18);
+}
+
 .value-inline.copyable {
   border-color: rgba(36, 165, 255, 0.45);
   background: rgba(36, 165, 255, 0.1);

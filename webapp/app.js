@@ -212,6 +212,20 @@ function formatDateTime(value) {
   });
 }
 
+
+function accessTitleByTier(tier) {
+  if (tier === "blatnoy") {
+    return "Блатной";
+  }
+  if (tier === "paid") {
+    return "Платный";
+  }
+  if (tier === "free") {
+    return "Бесплатный";
+  }
+  return "Нет доступа";
+}
+
 function statusClassByType(type) {
   if (type === "online") {
     return "meta-online";
@@ -389,22 +403,31 @@ function syncFreeAccessPanel() {
   const rewardRemaining = state.rewardReadyAt - now;
   const info = state.accessInfo || {};
 
-  const keyTitle = typeof info.keyTitle === "string" && info.keyTitle ? info.keyTitle : "Нет доступа";
+  const keyTitle = accessTitleByTier(info.tier);
   const keyValue = typeof info.keyValue === "string" && info.keyValue ? info.keyValue : null;
   const configName = typeof info.configName === "string" && info.configName ? info.configName : "-";
   const expiresText = formatDateTime(info.expiresAt);
 
+  freeAccessValue.classList.remove("tier-free", "tier-paid", "tier-blatnoy");
+  if (info.tier === "free") {
+    freeAccessValue.classList.add("tier-free");
+  } else if (info.tier === "paid") {
+    freeAccessValue.classList.add("tier-paid");
+  } else if (info.tier === "blatnoy") {
+    freeAccessValue.classList.add("tier-blatnoy");
+  }
+
   if (keyValue) {
-    freeAccessValue.textContent = `🔑 ${keyTitle}: ${keyValue}`;
+    freeAccessValue.textContent = `Доступ: ${keyTitle}`;
   } else {
-    freeAccessValue.textContent = `🔑 ${keyTitle}`;
+    freeAccessValue.textContent = `Доступ: ${keyTitle}`;
   }
   freeAccessValue.classList.remove("copyable");
   freeAccessValue.disabled = true;
   freeAccessValue.title = "";
 
-  rewardStatus.textContent = `Конфиг: ${configName}`;
-  rewardTimer.textContent = `Действует до: ${expiresText}`;
+  rewardStatus.textContent = `Ключ: ${keyValue || "-"}`;
+  rewardTimer.textContent = `Конфиг: ${configName} • Действует до: ${expiresText}`;
 
   if (info && info.tier && info.tier !== "none") {
     watchAdBtn.classList.add("hidden");
@@ -414,39 +437,35 @@ function syncFreeAccessPanel() {
 
   if (accessRemaining > 0) {
     if (!info || info.tier === "none") {
-      if (state.freeAccessKey) {
-        freeAccessValue.textContent = `🔑 Бесплатный: ${state.freeAccessKey}`;
-      } else {
-        freeAccessValue.textContent = "🔑 Бесплатный";
-      }
-      rewardStatus.textContent = "Конфиг: free-access";
-      rewardTimer.textContent = `Действует до: ${formatDateTime(new Date(now + accessRemaining).toISOString())}`;
+      freeAccessValue.textContent = "Доступ: Бесплатный";
+      rewardStatus.textContent = `Ключ: ${state.freeAccessKey || "-"}`;
+      rewardTimer.textContent = `Конфиг: free-access • Действует до: ${formatDateTime(new Date(now + accessRemaining).toISOString())}`;
     }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.add("hidden");
   } else if (rewardRemaining > 0) {
     if (!info || info.tier === "none") {
-      freeAccessValue.textContent = "🔒 Нет доступа";
-      rewardStatus.textContent = "Реклама просмотрена. Заберите профиль после таймера.";
-      rewardTimer.textContent = `Можно получить профиль через ${formatDurationShort(rewardRemaining)}.`;
+      freeAccessValue.textContent = "Нет активного доступа";
+      rewardStatus.textContent = "Ключ: -";
+      rewardTimer.textContent = `Конфиг: - • Можно получить через ${formatDurationShort(rewardRemaining)}`;
     }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
     claimAccessBtn.disabled = true;
   } else if (state.rewardReadyAt > 0) {
     if (!info || info.tier === "none") {
-      freeAccessValue.textContent = "🔒 Нет доступа";
-      rewardStatus.textContent = "Реклама просмотрена. Профиль можно забрать.";
-      rewardTimer.textContent = "Нажмите кнопку получения профиля.";
+      freeAccessValue.textContent = "Нет активного доступа";
+      rewardStatus.textContent = "Ключ: -";
+      rewardTimer.textContent = "Конфиг: - • Профиль можно получить сейчас";
     }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
     claimAccessBtn.disabled = false;
   } else {
     if (!info || info.tier === "none") {
-      freeAccessValue.textContent = "🔒 Нет доступа";
-      rewardStatus.textContent = "Посмотрите рекламу в Mini App и получите профиль WireGuard на 1 час.";
-      rewardTimer.textContent = "После просмотра рекламы нажмите кнопку получения профиля.";
+      freeAccessValue.textContent = "Нет активного доступа";
+      rewardStatus.textContent = "Ключ: -";
+      rewardTimer.textContent = "Конфиг: - • Смотрите рекламу для получения бесплатного доступа";
     }
     watchAdBtn.classList.remove("hidden");
     claimAccessBtn.classList.add("hidden");
@@ -805,12 +824,13 @@ copyRefBtn.addEventListener("click", async () => {
 });
 
 freeAccessValue.addEventListener("click", async () => {
-  if (!state.freeAccessKey) {
+  const copyValue = state.accessInfo?.keyValue || state.freeAccessKey;
+  if (!copyValue) {
     return;
   }
 
   try {
-    await navigator.clipboard.writeText(state.freeAccessKey);
+    await navigator.clipboard.writeText(copyValue);
     showToast("Ключ скопирован");
   } catch (_error) {
     showToast("Не удалось скопировать ключ");
