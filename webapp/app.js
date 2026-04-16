@@ -21,7 +21,6 @@ const adMedia = document.getElementById("adMedia");
 const adTitle = document.getElementById("adTitle");
 const adTimerText = document.getElementById("adTimerText");
 const adCaption = document.getElementById("adCaption");
-const adOpenLinkBtn = document.getElementById("adOpenLinkBtn");
 const adCloseBtn = document.getElementById("adCloseBtn");
 const refLinkInput = document.getElementById("refLink");
 const referralInvites = document.getElementById("referralInvites");
@@ -122,7 +121,6 @@ const state = {
 
 let freeServerAdInProgress = false;
 let adCountdownTimer = null;
-let activeAdTargetUrl = "";
 
 const tariffPlans = [
   {
@@ -509,7 +507,6 @@ function hideAdOverlay() {
     adOverlay.classList.add("hidden");
     adOverlay.setAttribute("aria-hidden", "true");
   }
-  activeAdTargetUrl = ""
 }
 
 
@@ -527,7 +524,6 @@ function showAdOverlay(ad, watchSeconds) {
   }
 
   clearAdCountdownTimer();
-  activeAdTargetUrl = typeof ad?.click_url === "string" ? ad.click_url : "";
   const imageUrl = typeof ad?.asset_url === "string" ? ad.asset_url : "";
   const title = typeof ad?.title === "string" && ad.title ? ad.title : "Рекламное предложение";
   const totalSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0 ? watchSeconds : REWARD_WATCH_SECONDS;
@@ -1123,16 +1119,6 @@ onboardingHelpBtn.addEventListener("click", () => {
 
 watchAdBtn.addEventListener("click", openRewardAd);
 claimAccessBtn.addEventListener("click", claimFreeAccess);
-
-if (adOpenLinkBtn) {
-  adOpenLinkBtn.addEventListener("click", () => {
-    if (!activeAdTargetUrl) {
-      showToast("Ссылка на предложение отсутствует");
-      return;
-    }
-    window.open(activeAdTargetUrl, "_blank", "noopener,noreferrer");
-  });
-}
 
 if (adCloseBtn) {
   adCloseBtn.addEventListener("click", () => {
