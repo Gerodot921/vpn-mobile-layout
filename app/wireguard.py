@@ -579,6 +579,22 @@ def reset_wireguard_profile(user_id: int) -> WireGuardProfile:
         return profile
 
 
+def delete_wireguard_profile(user_id: int) -> WireGuardProfile | None:
+    user_key = _user_key(user_id)
+    with _state_lock:
+        state = _load_state()
+        profile = state["profiles"].pop(user_key, None)
+        if profile is None:
+            return None
+        _save_state(state)
+
+    old_public_key = profile.get("public_key", "")
+    if old_public_key:
+        remove_peer_from_server(old_public_key, user_id)
+
+    return profile
+
+
 def list_peer_endpoints() -> dict[str, str]:
     """Return current peer endpoint mapping {public_key: endpoint} from WireGuard."""
     docker_bin, docker_container, interface_name = _docker_container_and_iface()

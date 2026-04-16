@@ -220,6 +220,17 @@ def get_free_access_remaining(user_id: int) -> timedelta | None:
         return None
 
 
+def delete_free_access(user_id: int) -> FreeAccessRecord | None:
+    user_key = _user_key(user_id)
+    with _state_lock:
+        state = _load_state()
+        record = state.pop(user_key, None)
+        if record is None:
+            return None
+        _save_state(state)
+        return record
+
+
 def format_free_access_remaining_text(user_id: int) -> str:
     remaining = get_free_access_remaining(user_id)
     if remaining is None:

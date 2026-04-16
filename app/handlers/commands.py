@@ -11,7 +11,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from app.ads import get_ad_stats, set_active_ad, set_ad_active
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
-from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
+from app.free_access import delete_free_access, get_total_free_claims, get_total_free_users, list_active_free_access_records
 from app.personal_configs import assign_personal_config_to_user, create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, upsert_username
 from app.subscriptions import delete_subscription, ensure_subscription, get_remaining_text, get_subscription_plan_name
@@ -22,7 +22,7 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.wireguard import add_peer_to_server, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
 
 # Owner ID for admin commands
 OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
@@ -190,7 +190,7 @@ def _build_admin_help_lines() -> list[str]:
         "/allstat — общая статистика по всем типам",
         "/create <n> <m> — создать n персональных конфигов на m дней",
         "/delete <config_id> — удалить персональный конфиг по ID",
-        "/deletetar — сбросить свой платный тариф",
+        "/deletetarif <username> <free|blatnoy|paid> — удалить тариф и его конфиг",
         "/adset <asset_url> [seconds] [click_url] — установить рекламу",
         "/adon — включить рекламу",
         "/adoff — выключить рекламу",
@@ -467,23 +467,77 @@ async def delete_personal_config_command(message: Message, command: CommandObjec
     )
 
 
-@router.message(Command(commands=["deletetar"]), F.func(_is_owner))
-async def delete_tariff_command(message: Message) -> None:
-    if not message.from_user:
+@router.message(Command(commands=["deletetarif"]), F.func(_is_owner))
+async def delete_tarif_command(message: Message, command: CommandObject | None = None) -> None:
+    args = (command.args or "").split() if command else []
+    if len(args) != 2:
+        await message.answer(
+            "Формат: /deletetarif <username> <free|blatnoy|paid>\n"
+            "Пример: /deletetarif testuser paid"
+        )
         return
 
-    user_id = message.from_user.id
-    deleted = delete_subscription(user_id)
-    if deleted is None:
-        await message.answer("Тариф уже сброшен: активной платной подписки нет")
+    username_arg = args[0].strip().lstrip("@")
+    tier_arg = args[1].strip().lower()
+    if not username_arg:
+        await message.answer("Укажите username пользователя")
         return
 
-    await message.answer(
-        "Тариф сброшен.\n"
-        f"Был план: {deleted.get('plan_name', 'Базовый')}\n"
-        f"До: {_fmt_dt(deleted.get('expires_at', '-'))}\n"
-        "Теперь вы снова в режиме бесплатного теста рекламы."
-    )
+    if tier_arg not in {"free", "blatnoy", "paid"}:
+        await message.answer("Тариф должен быть одним из: free, blatnoy, paid")
+        return
+
+    target_user_id = await _resolve_user_id_by_username(message, username_arg)
+    if target_user_id is None:
+        await message.answer(f"Пользователь @{username_arg} не найден в базе")
+        return
+
+    removed_lines: list[str] = []
+    if tier_arg == "free":
+        free_record = delete_free_access(target_user_id)
+        if free_record is None:
+            await message.answer(f"У @{username_arg} нет активного free тарифа")
+            return
+
+        profile = delete_wireguard_profile(target_user_id)
+        removed_lines.append(f"Удалён free тариф до {_fmt_dt(free_record.get('expires_at', '-'))}")
+        removed_lines.append(f"Удалён конфиг: {free_record.get('vpn_config_name', '-')}")
+        if profile is not None:
+            removed_lines.append(f"Удалён WireGuard профиль: {profile.get('config_filename', '-')}")
+
+    elif tier_arg == "blatnoy":
+        active_configs = list_active_personal_configs()
+        target_config = None
+        for record in active_configs:
+            if record.get("assigned_user_id") == target_user_id:
+                target_config = record
+                break
+
+        if target_config is None:
+            await message.answer(f"У @{username_arg} нет активного blatnoy тарифа")
+            return
+
+        deleted = delete_personal_config(target_config["config_id"])
+        if deleted is None:
+            await message.answer(f"Не удалось удалить blatnoy тариф для @{username_arg}")
+            return
+
+        removed_lines.append(f"Удалён blatnoy тариф: {deleted.get('config_id', '-')}")
+        removed_lines.append(f"Конфиг: {deleted.get('config_filename', '-')}")
+
+    elif tier_arg == "paid":
+        paid_record = delete_subscription(target_user_id)
+        if paid_record is None:
+            await message.answer(f"У @{username_arg} нет активного paid тарифа")
+            return
+
+        profile = delete_wireguard_profile(target_user_id)
+        removed_lines.append(f"Удалён paid тариф до {_fmt_dt(paid_record.get('expires_at', '-'))}")
+        removed_lines.append(f"План: {paid_record.get('plan_name', 'Базовый')}")
+        if profile is not None:
+            removed_lines.append(f"Удалён WireGuard профиль: {profile.get('config_filename', '-')}")
+
+    await message.answer("\n".join([f"Тариф @{username_arg} ({tier_arg}) удалён."] + removed_lines))
 
 
 @router.message(Command(commands=["ahelp"]), F.func(_is_owner))
