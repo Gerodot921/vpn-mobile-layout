@@ -14,7 +14,7 @@ from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import get_total_free_claims, get_total_free_users, list_active_free_access_records
 from app.personal_configs import assign_personal_config_to_user, create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, upsert_username
-from app.subscriptions import ensure_subscription, get_remaining_text, get_subscription_plan_name
+from app.subscriptions import delete_subscription, ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
 from app.texts import (
     FREE_ACCESS_PANEL_TEXT,
@@ -190,6 +190,7 @@ def _build_admin_help_lines() -> list[str]:
         "/allstat — общая статистика по всем типам",
         "/create <n> <m> — создать n персональных конфигов на m дней",
         "/delete <config_id> — удалить персональный конфиг по ID",
+        "/deletetar — сбросить свой платный тариф",
         "/adset <asset_url> [seconds] [click_url] — установить рекламу",
         "/adon — включить рекламу",
         "/adoff — выключить рекламу",
@@ -463,6 +464,25 @@ async def delete_personal_config_command(message: Message, command: CommandObjec
 
     await message.answer(
         f"Конфиг {config_id} удален.\nФайл: {deleted['config_filename']}\nДо: {_fmt_dt(deleted['expires_at'])}"
+    )
+
+
+@router.message(Command(commands=["deletetar"]), F.func(_is_owner))
+async def delete_tariff_command(message: Message) -> None:
+    if not message.from_user:
+        return
+
+    user_id = message.from_user.id
+    deleted = delete_subscription(user_id)
+    if deleted is None:
+        await message.answer("Тариф уже сброшен: активной платной подписки нет")
+        return
+
+    await message.answer(
+        "Тариф сброшен.\n"
+        f"Был план: {deleted.get('plan_name', 'Базовый')}\n"
+        f"До: {_fmt_dt(deleted.get('expires_at', '-'))}\n"
+        "Теперь вы снова в режиме бесплатного теста рекламы."
     )
 
 

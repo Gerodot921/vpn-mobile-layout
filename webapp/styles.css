@@ -510,6 +510,89 @@ body {
   display: none;
 }
 
+.ad-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  padding: 18px;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 7, 16, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.ad-overlay.hidden {
+  display: none;
+}
+
+.ad-card {
+  width: min(100%, 560px);
+  border: 1px solid rgba(36, 165, 255, 0.28);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(17, 29, 47, 0.98), rgba(11, 19, 32, 0.98));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+  padding: 16px;
+  animation: fadeUp 0.28s ease;
+}
+
+.ad-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ad-eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ad-card h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.ad-timer {
+  border: 1px solid rgba(36, 165, 255, 0.35);
+  background: rgba(36, 165, 255, 0.14);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ad-media-wrap {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #07111f;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+}
+
+.ad-media-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ad-caption {
+  margin: 12px 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.ad-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .ref-box {
   display: flex;
   gap: 8px;

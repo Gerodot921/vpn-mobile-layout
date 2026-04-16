@@ -16,6 +16,13 @@ const rewardStatus = document.getElementById("rewardStatus");
 const rewardTimer = document.getElementById("rewardTimer");
 const watchAdBtn = document.getElementById("watchAdBtn");
 const claimAccessBtn = document.getElementById("claimAccessBtn");
+const adOverlay = document.getElementById("adOverlay");
+const adMedia = document.getElementById("adMedia");
+const adTitle = document.getElementById("adTitle");
+const adTimerText = document.getElementById("adTimerText");
+const adCaption = document.getElementById("adCaption");
+const adOpenLinkBtn = document.getElementById("adOpenLinkBtn");
+const adCloseBtn = document.getElementById("adCloseBtn");
 const refLinkInput = document.getElementById("refLink");
 const referralInvites = document.getElementById("referralInvites");
 const referralStats = document.getElementById("referralStats");
@@ -114,6 +121,8 @@ const state = {
 };
 
 let freeServerAdInProgress = false;
+let adCountdownTimer = null;
+let activeAdTargetUrl = "";
 
 const tariffPlans = [
   {
@@ -486,6 +495,64 @@ function syncFreeAccessPanel() {
 }
 
 
+function clearAdCountdownTimer() {
+  if (adCountdownTimer !== null) {
+    window.clearInterval(adCountdownTimer);
+    adCountdownTimer = null;
+  }
+}
+
+
+function hideAdOverlay() {
+  clearAdCountdownTimer();
+  if (adOverlay) {
+    adOverlay.classList.add("hidden");
+    adOverlay.setAttribute("aria-hidden", "true");
+  }
+  activeAdTargetUrl = ""
+}
+
+
+function renderAdCountdown(remainingSeconds) {
+  if (!adTimerText) {
+    return;
+  }
+  adTimerText.textContent = `${Math.max(0, remainingSeconds)} сек`;
+}
+
+
+function showAdOverlay(ad, watchSeconds) {
+  if (!adOverlay || !adMedia || !adTitle || !adCaption || !adTimerText) {
+    return;
+  }
+
+  clearAdCountdownTimer();
+  activeAdTargetUrl = typeof ad?.click_url === "string" ? ad.click_url : "";
+  const imageUrl = typeof ad?.asset_url === "string" ? ad.asset_url : "";
+  const title = typeof ad?.title === "string" && ad.title ? ad.title : "Рекламное предложение";
+  const totalSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0 ? watchSeconds : REWARD_WATCH_SECONDS;
+
+  adTitle.textContent = title;
+  adCaption.textContent = `Просмотрите рекламу ${totalSeconds} секунд, чтобы открыть 1 час бесплатного VPN.`;
+  adMedia.src = imageUrl;
+  renderAdCountdown(totalSeconds);
+  adOverlay.classList.remove("hidden");
+  adOverlay.setAttribute("aria-hidden", "false");
+
+  let remaining = totalSeconds;
+  adCountdownTimer = window.setInterval(() => {
+    remaining -= 1;
+    if (remaining <= 0) {
+      renderAdCountdown(0);
+      clearAdCountdownTimer();
+      adCaption.textContent = "Реклама просмотрена. Теперь можно получить доступ.";
+      return;
+    }
+    renderAdCountdown(remaining);
+  }, 1000);
+}
+
+
 function openRewardAd() {
   void startRewardAdFlow();
 }
@@ -556,10 +623,7 @@ async function startRewardAdFlow() {
     saveRewardTimerState();
     syncFreeAccessPanel();
 
-    const targetUrl = state.adAssetUrl || REWARD_AD_URL;
-    if (targetUrl) {
-      window.open(targetUrl, "_blank", "noopener,noreferrer");
-    }
+    showAdOverlay(ad, state.adWatchSeconds);
 
     showToast("Реклама открыта. После просмотра получите профиль на 1 час.");
   } catch (error) {
@@ -642,10 +706,7 @@ async function startFreeServerAdFlow(server) {
     saveRewardTimerState();
     syncFreeAccessPanel();
 
-    const targetUrl = state.adAssetUrl || REWARD_AD_URL;
-    if (targetUrl) {
-      window.open(targetUrl, "_blank", "noopener,noreferrer");
-    }
+    showAdOverlay(ad, state.adWatchSeconds);
 
     showToast(`Реклама запущена на ${state.adWatchSeconds} секунд`);
 
@@ -665,6 +726,7 @@ async function startFreeServerAdFlow(server) {
         updateServerView();
         renderServerList();
 
+        hideAdOverlay();
         showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час.");
       } catch (error) {
         const message = error?.message || "Не удалось выдать доступ после рекламы";
@@ -678,6 +740,7 @@ async function startFreeServerAdFlow(server) {
     freeServerAdInProgress = false;
     state.rewardReadyAt = 0;
     saveRewardTimerState();
+    hideAdOverlay();
     syncFreeAccessPanel();
     showToast(error?.message || "Не удалось запустить рекламу");
   }
@@ -1060,6 +1123,26 @@ onboardingHelpBtn.addEventListener("click", () => {
 
 watchAdBtn.addEventListener("click", openRewardAd);
 claimAccessBtn.addEventListener("click", claimFreeAccess);
+
+if (adOpenLinkBtn) {
+  adOpenLinkBtn.addEventListener("click", () => {
+    if (!activeAdTargetUrl) {
+      showToast("Ссылка на предложение отсутствует");
+      return;
+    }
+    window.open(activeAdTargetUrl, "_blank", "noopener,noreferrer");
+  });
+}
+
+if (adCloseBtn) {
+  adCloseBtn.addEventListener("click", () => {
+    if (state.rewardReadyAt > Date.now()) {
+      showToast("Досмотрите рекламу до конца");
+      return;
+    }
+    hideAdOverlay();
+  });
+}
 
 async function initializeBaselineIp() {
   try {

@@ -163,6 +163,17 @@ def extend_subscription(user_id: int, days: int) -> SubscriptionRecord:
         return state[user_key]
 
 
+def delete_subscription(user_id: int) -> SubscriptionRecord | None:
+    user_key = str(user_id)
+    with _state_lock:
+        state = _load_state()
+        record = state.pop(user_key, None)
+        if record is None:
+            return None
+        _save_state(state)
+        return record
+
+
 def get_remaining_time(user_id: int) -> timedelta | None:
     user_key = str(user_id)
     state = _load_state()
