@@ -21,7 +21,6 @@ const adMedia = document.getElementById("adMedia");
 const adTitle = document.getElementById("adTitle");
 const adTimerText = document.getElementById("adTimerText");
 const adCaption = document.getElementById("adCaption");
-const adCloseBtn = document.getElementById("adCloseBtn");
 const refLinkInput = document.getElementById("refLink");
 const referralInvites = document.getElementById("referralInvites");
 const referralStats = document.getElementById("referralStats");
@@ -542,6 +541,10 @@ function showAdOverlay(ad, watchSeconds) {
       renderAdCountdown(0);
       clearAdCountdownTimer();
       adCaption.textContent = "Реклама просмотрена. Теперь можно получить доступ.";
+      window.setTimeout(() => {
+        hideAdOverlay();
+        syncFreeAccessPanel();
+      }, 600);
       return;
     }
     renderAdCountdown(remaining);
@@ -1119,16 +1122,6 @@ onboardingHelpBtn.addEventListener("click", () => {
 
 watchAdBtn.addEventListener("click", openRewardAd);
 claimAccessBtn.addEventListener("click", claimFreeAccess);
-
-if (adCloseBtn) {
-  adCloseBtn.addEventListener("click", () => {
-    if (state.rewardReadyAt > Date.now()) {
-      showToast("Досмотрите рекламу до конца");
-      return;
-    }
-    hideAdOverlay();
-  });
-}
 
 async function initializeBaselineIp() {
   try {

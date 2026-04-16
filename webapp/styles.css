@@ -589,8 +589,8 @@ body {
   line-height: 1.5;
 }
 
-.ad-actions {
-  grid-template-columns: 1fr;
+.ad-note {
+  margin: 0;
 }
 
 .ref-box {
