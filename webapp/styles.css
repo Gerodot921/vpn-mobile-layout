@@ -514,11 +514,10 @@ body {
   position: fixed;
   inset: 0;
   z-index: 50;
-  padding: 18px;
+  padding: 0;
   display: grid;
-  place-items: center;
-  background: rgba(3, 7, 16, 0.72);
-  backdrop-filter: blur(10px);
+  place-items: stretch;
+  background: #000;
 }
 
 .ad-overlay.hidden {
@@ -526,21 +525,31 @@ body {
 }
 
 .ad-card {
-  width: min(100%, 560px);
-  border: 1px solid rgba(36, 165, 255, 0.28);
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(17, 29, 47, 0.98), rgba(11, 19, 32, 0.98));
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
-  padding: 16px;
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+  box-shadow: none;
+  padding: 0;
+  overflow: hidden;
   animation: fadeUp 0.28s ease;
 }
 
 .ad-card-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin: 0;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
 }
 
 .ad-eyebrow {
@@ -567,11 +576,13 @@ body {
 }
 
 .ad-media-wrap {
-  border-radius: 18px;
+  border-radius: 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #07111f;
-  aspect-ratio: 16 / 9;
+  border: 0;
+  background: #000;
+  aspect-ratio: auto;
+  width: 100%;
+  height: 100%;
   display: grid;
   place-items: center;
 }
@@ -584,13 +595,29 @@ body {
 }
 
 .ad-caption {
-  margin: 12px 0 14px;
-  color: var(--muted);
-  line-height: 1.5;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 42px;
+  z-index: 2;
+  margin: 0;
+  padding: 10px 14px 0;
+  color: #e6f1ff;
+  line-height: 1.4;
+  font-weight: 700;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.72));
 }
 
 .ad-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  z-index: 2;
   margin: 0;
+  padding: 0 14px;
+  color: #b8cce7;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.72));
 }
 
 .ref-box {
