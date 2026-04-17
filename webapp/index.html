@@ -131,10 +131,11 @@
         </select>
 
         <p class="instruction-label">Приложение</p>
-        <div class="instruction-app-grid">
+        <div class="instruction-app-grid" id="instructionAppGrid">
           <button type="button" class="instruction-app-btn active" id="instructionAppVpnBtn" data-app="amneziavpn">AmneziaVPN</button>
           <button type="button" class="instruction-app-btn" id="instructionAppWgBtn" data-app="amneziawg">AmneziaWG</button>
         </div>
+        <p class="instruction-note hidden" id="instructionAppLimitedNote">Для этой платформы доступно только AmneziaVPN.</p>
 
         <button id="instructionNextBtn" class="btn primary">Далее</button>
       </div>
@@ -155,7 +156,7 @@
         <div class="instruction-card">
           <h3 id="guideDownloadTitle">1 Скачайте приложение AmneziaVPN</h3>
           <p class="instruction-note" id="guideDownloadNote">С официального сайта Amnezia.</p>
-          <a id="guideDownloadBtn" class="btn ghost" href="https://amnezia.org/ru/downloads" target="_blank" rel="noopener noreferrer">Скачать</a>
+          <a id="guideDownloadBtn" class="btn ghost instruction-download-btn" href="https://amnezia.org/ru/downloads" target="_blank" rel="noopener noreferrer">Скачать</a>
         </div>
 
         <div class="instruction-card">

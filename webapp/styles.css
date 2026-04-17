@@ -764,9 +764,9 @@ body {
   border: 1px solid rgba(36, 165, 255, 0.45);
   background: #02233a;
   color: #eaf3ff;
-  font-size: 22px;
-  font-weight: 600;
-  padding: 13px 14px;
+  font-size: 17px;
+  font-weight: 400;
+  padding: 11px 12px;
   margin-bottom: 14px;
 }
 
@@ -782,15 +782,37 @@ body {
   border-radius: 999px;
   background: #02233a;
   color: #eaf3ff;
-  font-weight: 700;
-  font-size: 14px;
-  padding: 10px 12px;
+  font-weight: 500;
+  font-size: 13px;
+  padding: 8px 11px;
   cursor: pointer;
 }
 
 .instruction-app-btn.active {
-  border-color: rgba(36, 165, 255, 0.92);
-  background: #083a5d;
+  border-color: rgba(36, 165, 255, 0.78);
+  background: #06314f;
+}
+
+.instruction-app-grid.single-choice {
+  grid-template-columns: 1fr;
+}
+
+.instruction-app-btn.single-choice {
+  opacity: 0.92;
+}
+
+.instruction-download-btn {
+  width: auto;
+  min-width: 132px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.onboarding-card .btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 12px;
 }
 
 .instruction-card {

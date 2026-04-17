@@ -40,8 +40,10 @@ const onboarding = document.getElementById("onboarding");
 const onboardingStageSelect = document.getElementById("onboardingStageSelect");
 const onboardingStageGuide = document.getElementById("onboardingStageGuide");
 const instructionPlatformSelect = document.getElementById("instructionPlatformSelect");
+const instructionAppGrid = document.getElementById("instructionAppGrid");
 const instructionAppVpnBtn = document.getElementById("instructionAppVpnBtn");
 const instructionAppWgBtn = document.getElementById("instructionAppWgBtn");
+const instructionAppLimitedNote = document.getElementById("instructionAppLimitedNote");
 const instructionNextBtn = document.getElementById("instructionNextBtn");
 const instructionBackBtn = document.getElementById("instructionBackBtn");
 const instructionDoneBtn = document.getElementById("instructionDoneBtn");
@@ -301,6 +303,11 @@ function selectedInstructionPlatformName() {
 }
 
 
+function supportsWgForPlatform(platform) {
+  return platform === "ios" || platform === "android";
+}
+
+
 function buildConfiguratorValue() {
   const rawValue = state.accessInfo?.keyValue || state.freeAccessKey || "";
   const clean = String(rawValue || "").trim();
@@ -318,6 +325,16 @@ function renderInstructionSelection() {
   if (instructionPlatformSelect) {
     instructionPlatformSelect.value = state.instruction.platform;
   }
+
+  const isLimited = !supportsWgForPlatform(state.instruction.platform);
+  if (isLimited) {
+    state.instruction.app = "amneziavpn";
+  }
+
+  instructionAppWgBtn?.classList.toggle("hidden", isLimited);
+  instructionAppGrid?.classList.toggle("single-choice", isLimited);
+  instructionAppVpnBtn?.classList.toggle("single-choice", isLimited);
+  instructionAppLimitedNote?.classList.toggle("hidden", !isLimited);
 
   instructionAppVpnBtn?.classList.toggle("active", state.instruction.app === "amneziavpn");
   instructionAppWgBtn?.classList.toggle("active", state.instruction.app === "amneziawg");
@@ -1293,6 +1310,9 @@ instructionAppVpnBtn?.addEventListener("click", () => {
 });
 
 instructionAppWgBtn?.addEventListener("click", () => {
+  if (!supportsWgForPlatform(state.instruction.platform)) {
+    return;
+  }
   state.instruction.app = "amneziawg";
   renderInstructionSelection();
 });
