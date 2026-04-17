@@ -446,7 +446,7 @@ function syncFreeAccessPanel() {
   freeAccessValue.title = "";
 
   rewardStatus.textContent = `Ключ: ${keyValue || "-"}`;
-  rewardTimer.textContent = `Конфиг: ${configName} • Действует до: ${expiresText}`;
+  rewardTimer.textContent = `Конфиг: ${configName}\nДействует до: ${expiresText}`;
 
   if (info && info.tier && info.tier !== "none") {
     watchAdBtn.classList.add("hidden");
@@ -458,7 +458,7 @@ function syncFreeAccessPanel() {
     if (!info || info.tier === "none") {
       freeAccessValue.textContent = "Доступ: Бесплатный";
       rewardStatus.textContent = `Ключ: ${state.freeAccessKey || "-"}`;
-      rewardTimer.textContent = `Конфиг: free-access • Действует до: ${formatDateTime(new Date(now + accessRemaining).toISOString())}`;
+      rewardTimer.textContent = `Конфиг: free-access\nДействует до: ${formatDateTime(new Date(now + accessRemaining).toISOString())}`;
     }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.add("hidden");
@@ -466,7 +466,7 @@ function syncFreeAccessPanel() {
     if (!info || info.tier === "none") {
       freeAccessValue.textContent = "Нет активного доступа";
       rewardStatus.textContent = "Ключ: -";
-      rewardTimer.textContent = `Конфиг: - • Можно получить через ${formatDurationShort(rewardRemaining)}`;
+      rewardTimer.textContent = `Конфиг: -\nМожно получить через ${formatDurationShort(rewardRemaining)}`;
     }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
@@ -475,7 +475,7 @@ function syncFreeAccessPanel() {
     if (!info || info.tier === "none") {
       freeAccessValue.textContent = "Нет активного доступа";
       rewardStatus.textContent = "Ключ: -";
-      rewardTimer.textContent = "Конфиг: - • Профиль можно получить сейчас";
+      rewardTimer.textContent = "Конфиг: -\nПрофиль можно получить сейчас";
     }
     watchAdBtn.classList.add("hidden");
     claimAccessBtn.classList.remove("hidden");
@@ -484,7 +484,7 @@ function syncFreeAccessPanel() {
     if (!info || info.tier === "none") {
       freeAccessValue.textContent = "Нет активного доступа";
       rewardStatus.textContent = "Ключ: -";
-      rewardTimer.textContent = "Конфиг: - • Смотрите рекламу для получения бесплатного доступа";
+      rewardTimer.textContent = "Конфиг: -\nСмотрите рекламу для получения бесплатного доступа";
     }
     watchAdBtn.classList.remove("hidden");
     claimAccessBtn.classList.add("hidden");

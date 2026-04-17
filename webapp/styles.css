@@ -111,6 +111,10 @@ body {
   color: #9ec2ea;
 }
 
+.reward-panel #rewardTimer {
+  white-space: pre-line;
+}
+
 .panel h2 {
   margin: 0 0 10px;
   font-size: 16px;

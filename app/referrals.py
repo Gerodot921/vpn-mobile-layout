@@ -19,6 +19,7 @@ class UserReferralData(TypedDict):
     bonus_days: int
     activated: bool
     username: str
+    started_at: str | None
     activated_at: str | None
 
 
@@ -54,6 +55,7 @@ def _load_state() -> ReferralState:
         bonus_days = value.get("bonus_days", 0)
         activated = value.get("activated", False)
         username = value.get("username", "")
+        started_at = value.get("started_at")
         activated_at = value.get("activated_at")
 
         state[key] = {
@@ -62,6 +64,7 @@ def _load_state() -> ReferralState:
             "bonus_days": bonus_days if isinstance(bonus_days, int) else 0,
             "activated": bool(activated),
             "username": username if isinstance(username, str) else "",
+            "started_at": started_at if isinstance(started_at, str) else None,
             "activated_at": activated_at if isinstance(activated_at, str) else None,
         }
 
@@ -83,6 +86,7 @@ def ensure_user(user_id: int, username: str | None = None) -> UserReferralData:
                 "bonus_days": 0,
                 "activated": False,
                 "username": username or "",
+                "started_at": _now_iso(),
                 "activated_at": None,
             }
             _save_state(state)
@@ -90,6 +94,8 @@ def ensure_user(user_id: int, username: str | None = None) -> UserReferralData:
             record = state[user_key]
             if record.get("username", "") != username:
                 record["username"] = username
+            if not isinstance(record.get("started_at"), str) or not record.get("started_at"):
+                record["started_at"] = _now_iso()
                 state[user_key] = record
                 _save_state(state)
         return state[user_key]
@@ -108,6 +114,7 @@ def register_user(user_id: int, username: str | None = None) -> bool:
             "bonus_days": 0,
             "activated": False,
             "username": username or "",
+            "started_at": _now_iso(),
             "activated_at": None,
         }
         _save_state(state)
@@ -129,6 +136,7 @@ def upsert_username(user_id: int, username: str | None) -> None:
                 "bonus_days": 0,
                 "activated": False,
                 "username": "",
+                "started_at": None,
                 "activated_at": None,
             },
         )
@@ -252,6 +260,7 @@ def activate_user_and_apply_bonus(user_id: int, username: str | None = None) -> 
                 "bonus_days": 0,
                 "activated": False,
                 "username": "",
+                "started_at": None,
                 "activated_at": None,
             },
         )
@@ -279,6 +288,7 @@ def activate_user_and_apply_bonus(user_id: int, username: str | None = None) -> 
                 "bonus_days": 0,
                 "activated": False,
                 "username": "",
+                "started_at": None,
                 "activated_at": None,
             },
         )
@@ -337,3 +347,19 @@ def get_referral_invites(referrer_id: int) -> list[ReferralInviteInfo]:
 
     invites.sort(key=lambda item: item["activated_at"], reverse=True)
     return invites
+
+
+def list_registered_users() -> list[tuple[int, UserReferralData]]:
+    with _state_lock:
+        state = _load_state()
+
+    users: list[tuple[int, UserReferralData]] = []
+    for user_key, record in state.items():
+        try:
+            user_id = int(user_key)
+        except Exception:
+            continue
+        users.append((user_id, record))
+
+    users.sort(key=lambda item: item[1].get("started_at") or item[1].get("activated_at") or "", reverse=False)
+    return users

@@ -13,7 +13,7 @@ from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import delete_free_access, get_total_free_claims, get_total_free_users, list_active_free_access_records
 from app.personal_configs import assign_personal_config_to_user, create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
-from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, upsert_username
+from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, list_registered_users, upsert_username
 from app.subscriptions import delete_subscription, ensure_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
 from app.texts import (
@@ -66,6 +66,13 @@ def _endpoint_to_ip(endpoint: str | None) -> str:
 
     # Fallback for unexpected formats.
     return endpoint
+
+
+def _format_registered_username(username: str | None) -> str:
+    if not isinstance(username, str) or not username.strip():
+        return "@unknown"
+    clean = username.strip().lstrip("@")
+    return f"@{clean}" if clean else "@unknown"
 
 
 async def _build_free_stats_lines(message: Message) -> list[str]:
@@ -547,41 +554,18 @@ async def admin_help(message: Message) -> None:
 
 @router.message(Command(commands=["allusers"]), F.func(_is_owner))
 async def all_users(message: Message) -> None:
-    active_free = list_active_free_access_records()
-    active_paid = list_active_subscriptions()
-    peer_endpoints = list_peer_endpoints()
+    registered_users = list_registered_users()
 
-    connected_user_ids: set[int] = set()
-    candidate_ids = set(active_free.keys()) | set(active_paid.keys())
-
-    for user_id in candidate_ids:
-        profile = get_wireguard_profile(user_id)
-        if profile is None:
-            continue
-        endpoint = peer_endpoints.get(profile.get("public_key", ""))
-        endpoint_ip = _endpoint_to_ip(endpoint)
-        if endpoint_ip != "-":
-            connected_user_ids.add(user_id)
-
-    if not connected_user_ids:
-        await message.answer("Подключённых пользователей сейчас нет")
+    if not registered_users:
+        await message.answer("Пользователей, нажимавших START, пока нет")
         return
 
-    rows: list[str] = ["👥 Подключённые пользователи", ""]
-    for user_id in sorted(connected_user_ids):
-        username = get_known_username(user_id)
-        if not username:
-            try:
-                chat = await message.bot.get_chat(user_id)
-                chat_username = getattr(chat, "username", None)
-                if isinstance(chat_username, str) and chat_username:
-                    username = chat_username
-                    upsert_username(user_id, chat_username)
-            except Exception:
-                username = None
-
-        label = f"@{username}" if isinstance(username, str) and username else "@unknown"
-        rows.append(f"{label} | id={user_id}")
+    rows: list[str] = ["👥 Пользователи бота", ""]
+    for user_id, record in registered_users:
+        username = record.get("username")
+        started_at = record.get("started_at") or record.get("activated_at") or "-"
+        label = _format_registered_username(username)
+        rows.append(f"{label} | id={user_id} | start={_fmt_dt(started_at)}")
 
     await _send_lines_report(message, rows)
 
