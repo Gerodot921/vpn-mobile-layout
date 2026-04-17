@@ -40,6 +40,7 @@ const onboarding = document.getElementById("onboarding");
 const onboardingStageSelect = document.getElementById("onboardingStageSelect");
 const onboardingStageGuide = document.getElementById("onboardingStageGuide");
 const instructionPlatformSelect = document.getElementById("instructionPlatformSelect");
+const instructionAppLabel = document.getElementById("instructionAppLabel");
 const instructionAppGrid = document.getElementById("instructionAppGrid");
 const instructionAppVpnBtn = document.getElementById("instructionAppVpnBtn");
 const instructionAppWgBtn = document.getElementById("instructionAppWgBtn");
@@ -89,6 +90,25 @@ const INSTRUCTION_APP_HINTS = {
     step3Hint: "В AmneziaWG откройте добавление туннеля и импортируйте конфигуратор из буфера обмена или ссылки.",
     shot1: "Скриншот 1: AmneziaWG — экран добавления туннеля",
     shot2: "Скриншот 2: AmneziaWG — импорт конфигуратора",
+  },
+};
+
+const INSTRUCTION_DOWNLOAD_URLS = {
+  windows: {
+    amneziavpn: "https://amnezia.org/ru/downloads",
+    amneziawg: "https://amnezia.org/ru/downloads",
+  },
+  macos: {
+    amneziavpn: "https://amnezia.org/ru/downloads",
+    amneziawg: "https://amnezia.org/ru/downloads",
+  },
+  ios: {
+    amneziavpn: "https://apps.apple.com/am/app/amneziavpn/id1600529900",
+    amneziawg: "https://apps.apple.com/am/app/amneziawg/id6478942365",
+  },
+  android: {
+    amneziavpn: "https://play.google.com/store/apps/details?id=org.amnezia.vpn",
+    amneziawg: "https://play.google.com/store/apps/details?id=org.amnezia.awg",
   },
 };
 
@@ -308,6 +328,12 @@ function supportsWgForPlatform(platform) {
 }
 
 
+function instructionDownloadUrl(platform, app) {
+  const platformMap = INSTRUCTION_DOWNLOAD_URLS[platform] || INSTRUCTION_DOWNLOAD_URLS.windows;
+  return platformMap[app] || INSTALL_AMNEZIA_URL;
+}
+
+
 function buildConfiguratorValue() {
   const rawValue = state.accessInfo?.keyValue || state.freeAccessKey || "";
   const clean = String(rawValue || "").trim();
@@ -332,7 +358,9 @@ function renderInstructionSelection() {
   }
 
   instructionAppWgBtn?.classList.toggle("hidden", isLimited);
+  instructionAppLabel?.classList.toggle("hidden", isLimited);
   instructionAppGrid?.classList.toggle("single-choice", isLimited);
+  instructionAppGrid?.classList.toggle("hidden", isLimited);
   instructionAppVpnBtn?.classList.toggle("single-choice", isLimited);
   instructionAppLimitedNote?.classList.toggle("hidden", !isLimited);
 
@@ -354,7 +382,7 @@ function renderInstructionGuide() {
     guideDownloadNote.textContent = `Для ${platformName} с официального сайта Amnezia.`;
   }
   if (guideDownloadBtn) {
-    guideDownloadBtn.href = INSTALL_AMNEZIA_URL;
+    guideDownloadBtn.href = instructionDownloadUrl(state.instruction.platform, state.instruction.app);
   }
   if (guideConfiguratorValue) {
     guideConfiguratorValue.value = configValue;
