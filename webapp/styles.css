@@ -692,6 +692,7 @@ body {
   place-items: center;
   padding: 18px;
   z-index: 20;
+  overflow-y: auto;
 }
 
 .onboarding.hidden {
@@ -699,8 +700,8 @@ body {
 }
 
 .onboarding-card {
-  width: min(460px, 100%);
-  background: linear-gradient(180deg, #13253e, #0e1b2f);
+  width: min(520px, 100%);
+  background: linear-gradient(180deg, #0d1e33, #081423);
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 16px;
@@ -708,16 +709,160 @@ body {
 
 .onboarding-card h2 {
   margin: 0 0 8px;
+  text-align: center;
 }
 
-.onboarding-card ol {
+.instruction-step-head,
+.instruction-progress-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin: 0 0 14px;
-  padding-left: 20px;
-  color: #c4d6ed;
 }
 
-.onboarding-card li {
+.instruction-step-head p,
+.instruction-progress-row p {
+  margin: 0;
+  color: #c4d6ed;
+  line-height: 1.35;
+}
+
+.instruction-step-index {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(36, 165, 255, 0.65);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #cfe8ff;
+  background: rgba(36, 165, 255, 0.18);
+}
+
+.instruction-progress {
+  margin-bottom: 14px;
+}
+
+.instruction-progress-row.done .instruction-step-index {
+  border-color: rgba(0, 211, 167, 0.65);
+  background: rgba(0, 211, 167, 0.2);
+  color: #9ef7e1;
+}
+
+.instruction-label {
+  margin: 0 0 8px;
+  color: #c4d6ed;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.instruction-select {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(36, 165, 255, 0.45);
+  background: #02233a;
+  color: #eaf3ff;
+  font-size: 22px;
+  font-weight: 600;
+  padding: 13px 14px;
+  margin-bottom: 14px;
+}
+
+.instruction-app-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.instruction-app-btn {
+  border: 1px solid rgba(36, 165, 255, 0.45);
+  border-radius: 999px;
+  background: #02233a;
+  color: #eaf3ff;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.instruction-app-btn.active {
+  border-color: rgba(36, 165, 255, 0.92);
+  background: #083a5d;
+}
+
+.instruction-card {
+  border: 1px solid rgba(36, 165, 255, 0.25);
+  border-radius: 14px;
+  background: #08243c;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.instruction-card h3 {
+  margin: 0 0 10px;
+  font-size: 19px;
+}
+
+.instruction-note {
+  margin: 0 0 10px;
+  color: #c4d6ed;
+  font-size: 13px;
+}
+
+.instruction-config-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
   margin-bottom: 8px;
+}
+
+.instruction-config-row input {
+  min-width: 0;
+  width: 100%;
+  background: #020b15;
+  border: 1px solid rgba(149, 170, 199, 0.35);
+  border-radius: 10px;
+  color: #eaf3ff;
+  padding: 10px 11px;
+  font-size: 13px;
+}
+
+.instruction-screenshots-placeholder {
+  display: grid;
+  gap: 8px;
+}
+
+.instruction-placeholder-box {
+  border: 1px dashed rgba(149, 170, 199, 0.5);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #9fb7d3;
+  min-height: 84px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: 13px;
+  padding: 8px;
+}
+
+.instruction-actions-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+@media (max-width: 520px) {
+  .instruction-app-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .instruction-actions-two {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @keyframes fadeUp {

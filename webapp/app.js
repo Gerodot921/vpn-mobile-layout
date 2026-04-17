@@ -37,7 +37,20 @@ const serverList = document.getElementById("serverList");
 const paidServerList = document.getElementById("paidServerList");
 const timeWarning = document.getElementById("timeWarning");
 const onboarding = document.getElementById("onboarding");
-const onboardingBtn = document.getElementById("onboardingBtn");
+const onboardingStageSelect = document.getElementById("onboardingStageSelect");
+const onboardingStageGuide = document.getElementById("onboardingStageGuide");
+const instructionPlatformSelect = document.getElementById("instructionPlatformSelect");
+const instructionAppVpnBtn = document.getElementById("instructionAppVpnBtn");
+const instructionAppWgBtn = document.getElementById("instructionAppWgBtn");
+const instructionNextBtn = document.getElementById("instructionNextBtn");
+const instructionBackBtn = document.getElementById("instructionBackBtn");
+const instructionDoneBtn = document.getElementById("instructionDoneBtn");
+const guideDownloadTitle = document.getElementById("guideDownloadTitle");
+const guideDownloadNote = document.getElementById("guideDownloadNote");
+const guideDownloadBtn = document.getElementById("guideDownloadBtn");
+const guideConfiguratorValue = document.getElementById("guideConfiguratorValue");
+const guideConfiguratorExample = document.getElementById("guideConfiguratorExample");
+const guideCopyConfiguratorBtn = document.getElementById("guideCopyConfiguratorBtn");
 const serversPanel = document.getElementById("serversPanel");
 
 const INSTALL_AMNEZIA_URL = "https://amnezia.org/ru/downloads";
@@ -45,6 +58,18 @@ const REWARD_AD_URL = "";
 const REWARD_WATCH_SECONDS = 30;
 const REWARD_READY_STORAGE_KEY = "skull_vpn_reward_ready_at_v1";
 const ONBOARDING_KEY = "skull_vpn_onboarding_seen_v2";
+
+const INSTRUCTION_APPS = {
+  amneziavpn: "AmneziaVPN",
+  amneziawg: "AmneziaWG",
+};
+
+const INSTRUCTION_PLATFORM_LABELS = {
+  windows: "Windows",
+  macos: "macOS",
+  ios: "iOS",
+  android: "Android",
+};
 
 const serverConfigs = [
   {
@@ -116,6 +141,11 @@ const state = {
   adSessionToken: null,
   adWatchSeconds: REWARD_WATCH_SECONDS,
   adAssetUrl: "",
+  instruction: {
+    platform: "windows",
+    app: "amneziavpn",
+    stage: "select",
+  },
 };
 
 let freeServerAdInProgress = false;
@@ -222,6 +252,112 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+
+function detectInstructionPlatform() {
+  const ua = String(window.navigator.userAgent || "").toLowerCase();
+  const tgPlatform = String(tg?.platform || "").toLowerCase();
+
+  if (tgPlatform.includes("ios") || ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) {
+    return "ios";
+  }
+  if (tgPlatform.includes("android") || ua.includes("android")) {
+    return "android";
+  }
+  if (ua.includes("mac os") || ua.includes("macintosh")) {
+    return "macos";
+  }
+  return "windows";
+}
+
+
+function selectedInstructionAppName() {
+  return INSTRUCTION_APPS[state.instruction.app] || "AmneziaVPN";
+}
+
+
+function selectedInstructionPlatformName() {
+  return INSTRUCTION_PLATFORM_LABELS[state.instruction.platform] || "Windows";
+}
+
+
+function buildConfiguratorValue() {
+  const rawValue = state.accessInfo?.keyValue || state.freeAccessKey || "";
+  const clean = String(rawValue || "").trim();
+  if (!clean) {
+    return "amnezia://config/your-configurator";
+  }
+  if (clean.includes("://")) {
+    return clean;
+  }
+  return `amnezia://config/${clean}`;
+}
+
+
+function renderInstructionSelection() {
+  if (instructionPlatformSelect) {
+    instructionPlatformSelect.value = state.instruction.platform;
+  }
+
+  instructionAppVpnBtn?.classList.toggle("active", state.instruction.app === "amneziavpn");
+  instructionAppWgBtn?.classList.toggle("active", state.instruction.app === "amneziawg");
+}
+
+
+function renderInstructionGuide() {
+  const appName = selectedInstructionAppName();
+  const platformName = selectedInstructionPlatformName();
+  const configValue = buildConfiguratorValue();
+
+  if (guideDownloadTitle) {
+    guideDownloadTitle.textContent = `1 Скачайте приложение ${appName}`;
+  }
+  if (guideDownloadNote) {
+    guideDownloadNote.textContent = `Для ${platformName} с официального сайта Amnezia.`;
+  }
+  if (guideDownloadBtn) {
+    guideDownloadBtn.href = INSTALL_AMNEZIA_URL;
+  }
+  if (guideConfiguratorValue) {
+    guideConfiguratorValue.value = configValue;
+  }
+  if (guideConfiguratorExample) {
+    guideConfiguratorExample.textContent = `Пример: ${configValue}`;
+  }
+}
+
+
+function setOnboardingStage(stage) {
+  state.instruction.stage = stage;
+  if (stage === "guide") {
+    onboardingStageSelect?.classList.add("hidden");
+    onboardingStageGuide?.classList.remove("hidden");
+    renderInstructionGuide();
+    return;
+  }
+
+  onboardingStageGuide?.classList.add("hidden");
+  onboardingStageSelect?.classList.remove("hidden");
+  renderInstructionSelection();
+}
+
+
+function closeOnboarding() {
+  onboarding.classList.add("hidden");
+  try {
+    localStorage.setItem(ONBOARDING_KEY, "1");
+  } catch (_error) {
+    // ignored
+  }
+}
+
+
+function openOnboarding() {
+  state.instruction.platform = detectInstructionPlatform();
+  state.instruction.app = "amneziavpn";
+  onboarding.classList.remove("hidden");
+  setOnboardingStage("select");
 }
 
 
@@ -824,6 +960,9 @@ function applyUserState(payload) {
 
   updateReferralStats();
   syncFreeAccessPanel();
+  if (state.instruction.stage === "guide" && !onboarding.classList.contains("hidden")) {
+    renderInstructionGuide();
+  }
   renderServerList();
   renderByMode();
 }
@@ -1110,13 +1249,48 @@ autoServerBtn.addEventListener("click", () => {
   showToast(`Выбран лучший сервер: ${currentServer().name}`);
 });
 
-onboardingBtn.addEventListener("click", () => {
-  onboarding.classList.add("hidden");
-  localStorage.setItem(ONBOARDING_KEY, "1");
+if (instructionPlatformSelect) {
+  instructionPlatformSelect.addEventListener("change", () => {
+    state.instruction.platform = instructionPlatformSelect.value;
+  });
+}
+
+instructionAppVpnBtn?.addEventListener("click", () => {
+  state.instruction.app = "amneziavpn";
+  renderInstructionSelection();
+});
+
+instructionAppWgBtn?.addEventListener("click", () => {
+  state.instruction.app = "amneziawg";
+  renderInstructionSelection();
+});
+
+instructionNextBtn?.addEventListener("click", () => {
+  setOnboardingStage("guide");
+});
+
+instructionBackBtn?.addEventListener("click", () => {
+  setOnboardingStage("select");
+});
+
+instructionDoneBtn?.addEventListener("click", () => {
+  closeOnboarding();
+});
+
+guideCopyConfiguratorBtn?.addEventListener("click", async () => {
+  if (!guideConfiguratorValue?.value) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(guideConfiguratorValue.value);
+    showToast("Конфигуратор скопирован");
+  } catch (_error) {
+    showToast("Не удалось скопировать конфигуратор");
+  }
 });
 
 onboardingHelpBtn.addEventListener("click", () => {
-  onboarding.classList.remove("hidden");
+  openOnboarding();
 });
 
 
@@ -1143,7 +1317,7 @@ function showOnboardingIfNeeded() {
   } catch (_error) {
     // If storage is unavailable in WebView, show onboarding each launch.
   }
-  onboarding.classList.remove("hidden");
+  openOnboarding();
 }
 
 bootstrapFromTelegram();

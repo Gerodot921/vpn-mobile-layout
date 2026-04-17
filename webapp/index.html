@@ -115,15 +115,70 @@
     </section>
 
     <section class="onboarding hidden" id="onboarding">
-      <div class="onboarding-card">
-        <h2>Как подключиться</h2>
-        <ol>
-          <li>Нажмите «Подключиться»</li>
-          <li>Откроется Amnezia</li>
-          <li>Подтвердите импорт</li>
-          <li>Готово</li>
-        </ol>
-        <button id="onboardingBtn" class="btn primary">Понятно</button>
+      <div class="onboarding-card" id="onboardingStageSelect">
+        <h2>Подключение</h2>
+        <div class="instruction-step-head">
+          <span class="instruction-step-index">1</span>
+          <p>Выберите подходящую платформу и приложение</p>
+        </div>
+
+        <label class="instruction-label" for="instructionPlatformSelect">Платформа</label>
+        <select id="instructionPlatformSelect" class="instruction-select">
+          <option value="macos">macOS</option>
+          <option value="windows">Windows</option>
+          <option value="ios">iOS</option>
+          <option value="android">Android</option>
+        </select>
+
+        <p class="instruction-label">Приложение</p>
+        <div class="instruction-app-grid">
+          <button type="button" class="instruction-app-btn active" id="instructionAppVpnBtn" data-app="amneziavpn">AmneziaVPN</button>
+          <button type="button" class="instruction-app-btn" id="instructionAppWgBtn" data-app="amneziawg">AmneziaWG</button>
+        </div>
+
+        <button id="instructionNextBtn" class="btn primary">Далее</button>
+      </div>
+
+      <div class="onboarding-card hidden" id="onboardingStageGuide">
+        <h2>Подключение</h2>
+        <div class="instruction-progress">
+          <div class="instruction-progress-row done">
+            <span class="instruction-step-index">✓</span>
+            <p>Выберите подходящую платформу и приложение</p>
+          </div>
+          <div class="instruction-progress-row">
+            <span class="instruction-step-index">2</span>
+            <p>Скачайте приложение, скопируйте конфигуратор и добавьте его</p>
+          </div>
+        </div>
+
+        <div class="instruction-card">
+          <h3 id="guideDownloadTitle">1 Скачайте приложение AmneziaVPN</h3>
+          <p class="instruction-note" id="guideDownloadNote">С официального сайта Amnezia.</p>
+          <a id="guideDownloadBtn" class="btn ghost" href="https://amnezia.org/ru/downloads" target="_blank" rel="noopener noreferrer">Скачать</a>
+        </div>
+
+        <div class="instruction-card">
+          <h3>2 Скопируйте ваш VPN конфигуратор</h3>
+          <div class="instruction-config-row">
+            <input id="guideConfiguratorValue" readonly value="amnezia://config/your-configurator" />
+            <button type="button" class="btn tiny" id="guideCopyConfiguratorBtn">Копировать</button>
+          </div>
+          <p class="instruction-note" id="guideConfiguratorExample">Пример: amnezia://config/your-configurator</p>
+        </div>
+
+        <div class="instruction-card">
+          <h3>3 Вставьте конфигуратор в приложение и включите VPN</h3>
+          <div class="instruction-screenshots-placeholder">
+            <div class="instruction-placeholder-box">Скриншот 1 (позже)</div>
+            <div class="instruction-placeholder-box">Скриншот 2 (позже)</div>
+          </div>
+        </div>
+
+        <div class="instruction-actions-two">
+          <button type="button" id="instructionBackBtn" class="btn ghost">Назад</button>
+          <button type="button" id="instructionDoneBtn" class="btn primary">Готово</button>
+        </div>
       </div>
     </section>
 
