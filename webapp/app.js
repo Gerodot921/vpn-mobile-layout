@@ -51,6 +51,10 @@ const guideDownloadBtn = document.getElementById("guideDownloadBtn");
 const guideConfiguratorValue = document.getElementById("guideConfiguratorValue");
 const guideConfiguratorExample = document.getElementById("guideConfiguratorExample");
 const guideCopyConfiguratorBtn = document.getElementById("guideCopyConfiguratorBtn");
+const guideInsertTitle = document.getElementById("guideInsertTitle");
+const guideInsertHint = document.getElementById("guideInsertHint");
+const guideShot1Label = document.getElementById("guideShot1Label");
+const guideShot2Label = document.getElementById("guideShot2Label");
 const serversPanel = document.getElementById("serversPanel");
 
 const INSTALL_AMNEZIA_URL = "https://amnezia.org/ru/downloads";
@@ -69,6 +73,21 @@ const INSTRUCTION_PLATFORM_LABELS = {
   macos: "macOS",
   ios: "iOS",
   android: "Android",
+};
+
+const INSTRUCTION_APP_HINTS = {
+  amneziavpn: {
+    step3Title: "3 Вставьте конфигуратор в AmneziaVPN и включите VPN",
+    step3Hint: "В AmneziaVPN откройте добавление профиля и выберите импорт из буфера обмена или по ссылке.",
+    shot1: "Скриншот 1: AmneziaVPN — экран добавления профиля",
+    shot2: "Скриншот 2: AmneziaVPN — вставка конфигуратора",
+  },
+  amneziawg: {
+    step3Title: "3 Вставьте конфигуратор в AmneziaWG и включите VPN",
+    step3Hint: "В AmneziaWG откройте добавление туннеля и импортируйте конфигуратор из буфера обмена или ссылки.",
+    shot1: "Скриншот 1: AmneziaWG — экран добавления туннеля",
+    shot2: "Скриншот 2: AmneziaWG — импорт конфигуратора",
+  },
 };
 
 const serverConfigs = [
@@ -309,6 +328,7 @@ function renderInstructionGuide() {
   const appName = selectedInstructionAppName();
   const platformName = selectedInstructionPlatformName();
   const configValue = buildConfiguratorValue();
+  const appHints = INSTRUCTION_APP_HINTS[state.instruction.app] || INSTRUCTION_APP_HINTS.amneziavpn;
 
   if (guideDownloadTitle) {
     guideDownloadTitle.textContent = `1 Скачайте приложение ${appName}`;
@@ -324,6 +344,18 @@ function renderInstructionGuide() {
   }
   if (guideConfiguratorExample) {
     guideConfiguratorExample.textContent = `Пример: ${configValue}`;
+  }
+  if (guideInsertTitle) {
+    guideInsertTitle.textContent = appHints.step3Title;
+  }
+  if (guideInsertHint) {
+    guideInsertHint.textContent = appHints.step3Hint;
+  }
+  if (guideShot1Label) {
+    guideShot1Label.textContent = appHints.shot1;
+  }
+  if (guideShot2Label) {
+    guideShot2Label.textContent = appHints.shot2;
   }
 }
 
