@@ -285,13 +285,13 @@ function formatDateTime(value) {
     return value;
   }
 
-  return new Date(parsed).toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const date = new Date(parsed);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${hours}:${minutes} ${day}.${month}.${year}`;
 }
 
 
@@ -846,7 +846,7 @@ async function startFreeServerAdFlow(server) {
         renderServerList();
 
         hideAdOverlay();
-        showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час.");
+        showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час. Мы выслали вам в личные сообщения доступ к SkullVPN.");
       } catch (error) {
         const message = error?.message || "Не удалось выдать доступ после рекламы";
         showToast(message);
