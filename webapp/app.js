@@ -14,8 +14,7 @@ const installBtn = document.getElementById("installBtn");
 const freeAccessValue = document.getElementById("freeAccessValue");
 const rewardStatus = document.getElementById("rewardStatus");
 const rewardTimer = document.getElementById("rewardTimer");
-const watchAdBtn = document.getElementById("watchAdBtn");
-const claimAccessBtn = document.getElementById("claimAccessBtn");
+const rewardPanel = document.querySelector(".reward-panel");
 const adOverlay = document.getElementById("adOverlay");
 const adMedia = document.getElementById("adMedia");
 const adTitle = document.getElementById("adTitle");
@@ -482,7 +481,7 @@ function renderServerList() {
     item.innerHTML = `
       <div class="server-row">
         <span class="server-name">${server.emoji} ${server.name}</span>
-        ${locked ? `<span class="meta-lock">${server.access === "free" ? "🔒 После рекламы" : "🔒 Нужна подписка"}</span>` : ""}
+        ${locked ? '<span class="meta-lock">🔒 Нужна подписка</span>' : ""}
       </div>
       <div class="server-meta">
         <span class="meta-badge ${statusClassByType(server.status)}">${server.statusText}</span>
@@ -491,13 +490,14 @@ function renderServerList() {
     `;
 
     item.addEventListener("click", () => {
+      if (server.access === "free" && !hasFreeAccess()) {
+        void startFreeServerAdFlow(server);
+        return;
+      }
+
       if (locked && !canAccessServer(server)) {
-        if (server.access === "free") {
-          void startFreeServerAdFlow(server);
-        } else {
-          showToast("Для этого сервера нужна подписка");
-          subscriptionBtn.click();
-        }
+        showToast("Для этого сервера нужна подписка");
+        subscriptionBtn.click();
         return;
       }
 
@@ -516,7 +516,7 @@ function renderServerList() {
   };
 
   freeServers.forEach((server) => {
-    renderServerCard(server, serverConfigs.indexOf(server), serverList, !hasFreeAccess());
+    renderServerCard(server, serverConfigs.indexOf(server), serverList, false);
   });
 
   paidServers.forEach((server) => {
@@ -630,10 +630,20 @@ function saveRewardTimerState() {
 
 
 function syncFreeAccessPanel() {
+  if (!rewardPanel) {
+    return;
+  }
+
   const now = Date.now();
   const accessRemaining = state.freeAccessUntil - now;
-  const rewardRemaining = state.rewardReadyAt - now;
   const info = state.accessInfo || {};
+  const hasAnyActiveAccess =
+    (typeof info.tier === "string" && info.tier !== "none") || accessRemaining > 0 || hasPaidAccess();
+
+  rewardPanel.classList.toggle("hidden", !hasAnyActiveAccess);
+  if (!hasAnyActiveAccess) {
+    return;
+  }
 
   const keyTitle = accessTitleByTier(info.tier);
   const keyValue = typeof info.keyValue === "string" && info.keyValue ? info.keyValue : null;
@@ -660,48 +670,6 @@ function syncFreeAccessPanel() {
 
   rewardStatus.textContent = `Ключ: ${keyValue || "-"}`;
   rewardTimer.textContent = `Конфиг: ${configName}\nДействует до: ${expiresText}`;
-
-  if (info && info.tier && info.tier !== "none") {
-    watchAdBtn.classList.add("hidden");
-    claimAccessBtn.classList.add("hidden");
-    return;
-  }
-
-  if (accessRemaining > 0) {
-    if (!info || info.tier === "none") {
-      freeAccessValue.textContent = "Доступ: Бесплатный";
-      rewardStatus.textContent = `Ключ: ${state.freeAccessKey || "-"}`;
-      rewardTimer.textContent = `Конфиг: free-access\nДействует до: ${formatDateTime(new Date(now + accessRemaining).toISOString())}`;
-    }
-    watchAdBtn.classList.add("hidden");
-    claimAccessBtn.classList.add("hidden");
-  } else if (rewardRemaining > 0) {
-    if (!info || info.tier === "none") {
-      freeAccessValue.textContent = "Нет активного доступа";
-      rewardStatus.textContent = "Ключ: -";
-      rewardTimer.textContent = `Конфиг: -\nМожно получить через ${formatDurationShort(rewardRemaining)}`;
-    }
-    watchAdBtn.classList.add("hidden");
-    claimAccessBtn.classList.remove("hidden");
-    claimAccessBtn.disabled = true;
-  } else if (state.rewardReadyAt > 0) {
-    if (!info || info.tier === "none") {
-      freeAccessValue.textContent = "Нет активного доступа";
-      rewardStatus.textContent = "Ключ: -";
-      rewardTimer.textContent = "Конфиг: -\nПрофиль можно получить сейчас";
-    }
-    watchAdBtn.classList.add("hidden");
-    claimAccessBtn.classList.remove("hidden");
-    claimAccessBtn.disabled = false;
-  } else {
-    if (!info || info.tier === "none") {
-      freeAccessValue.textContent = "Нет активного доступа";
-      rewardStatus.textContent = "Ключ: -";
-      rewardTimer.textContent = "Конфиг: -\nСмотрите рекламу для получения бесплатного доступа";
-    }
-    watchAdBtn.classList.remove("hidden");
-    claimAccessBtn.classList.add("hidden");
-  }
 }
 
 
@@ -765,11 +733,6 @@ function showAdOverlay(ad, watchSeconds) {
 }
 
 
-function openRewardAd() {
-  void startRewardAdFlow();
-}
-
-
 async function requestAdSession() {
   if (!tg?.initData) {
     throw new Error("Откройте Mini App внутри Telegram");
@@ -819,31 +782,6 @@ async function completeAdSession() {
 }
 
 
-async function startRewardAdFlow() {
-  try {
-    const data = await requestAdSession();
-    const ad = data?.ad || {};
-    const watchSeconds = Number(ad.duration_sec || REWARD_WATCH_SECONDS);
-
-    state.adSessionToken = data?.session_token || null;
-    state.adWatchSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0
-      ? watchSeconds
-      : REWARD_WATCH_SECONDS;
-    state.adAssetUrl = typeof ad.asset_url === "string" ? ad.asset_url : "";
-
-    state.rewardReadyAt = Date.now() + state.adWatchSeconds * 1000;
-    saveRewardTimerState();
-    syncFreeAccessPanel();
-
-    showAdOverlay(ad, state.adWatchSeconds);
-
-    showToast("Реклама открыта. После просмотра получите профиль на 1 час.");
-  } catch (error) {
-    showToast(error?.message || "Не удалось запустить рекламу");
-  }
-}
-
-
 async function requestFreeAccess() {
   if (!tg?.initData) {
     throw new Error("Откройте Mini App внутри Telegram");
@@ -863,37 +801,6 @@ async function requestFreeAccess() {
   }
 
   return data;
-}
-
-
-function claimFreeAccess() {
-  const now = Date.now();
-  if (state.rewardReadyAt > now) {
-    showToast("Сначала досмотрите рекламу");
-    return;
-  }
-  if (!state.adSessionToken) {
-    showToast("Сначала запустите рекламу");
-    return;
-  }
-
-  claimAccessBtn.disabled = true;
-
-  completeAdSession()
-    .then(() => requestFreeAccess())
-    .then((data) => {
-      state.adSessionToken = null;
-      state.adWatchSeconds = REWARD_WATCH_SECONDS;
-      state.adAssetUrl = "";
-      state.rewardReadyAt = 0;
-      saveRewardTimerState();
-      applyUserState(data);
-      showToast("Бесплатный доступ активирован");
-    })
-    .catch((error) => {
-      claimAccessBtn.disabled = false;
-      showToast(error.message || "Не удалось получить доступ");
-    });
 }
 
 
@@ -1151,8 +1058,7 @@ function openConfigInAmnezia() {
   const active = currentServer();
   if (!canAccessServer(active)) {
     if (active.access === "free") {
-      showToast("Сначала получите бесплатный WireGuard-профиль на 1 час");
-      watchAdBtn.click();
+      void startFreeServerAdFlow(active);
     } else {
       showToast("Для этого сервера нужна подписка");
     }
@@ -1298,6 +1204,26 @@ changeServerBtn.addEventListener("click", () => {
 });
 
 autoServerBtn.addEventListener("click", () => {
+  if (!hasFreeAccess() && !hasPaidAccess()) {
+    let bestFreeIndex = -1;
+    let bestFreePing = Number.POSITIVE_INFINITY;
+
+    serverConfigs.forEach((server, index) => {
+      if (server.access !== "free" || server.status === "offline") {
+        return;
+      }
+      if (server.pingMs < bestFreePing) {
+        bestFreePing = server.pingMs;
+        bestFreeIndex = index;
+      }
+    });
+
+    if (bestFreeIndex >= 0) {
+      void startFreeServerAdFlow(serverConfigs[bestFreeIndex]);
+      return;
+    }
+  }
+
   let bestIndex = state.serverIndex;
   let bestPing = Number.POSITIVE_INFINITY;
 
@@ -1315,8 +1241,7 @@ autoServerBtn.addEventListener("click", () => {
   });
 
   if (bestPing === Number.POSITIVE_INFINITY) {
-    showToast("Сначала получите бесплатный WireGuard-профиль на 1 час");
-    watchAdBtn.click();
+    showToast("Нет доступных серверов без подписки");
     return;
   }
 
@@ -1372,10 +1297,6 @@ guideCopyConfiguratorBtn?.addEventListener("click", async () => {
 onboardingHelpBtn.addEventListener("click", () => {
   openOnboarding();
 });
-
-
-watchAdBtn.addEventListener("click", openRewardAd);
-claimAccessBtn.addEventListener("click", claimFreeAccess);
 
 async function initializeBaselineIp() {
   try {
