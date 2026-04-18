@@ -280,12 +280,16 @@ function formatDateTime(value) {
     return "-";
   }
 
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) {
-    return value;
+  let date;
+  try {
+    date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "-";
+    }
+  } catch (_error) {
+    return "-";
   }
 
-  const date = new Date(parsed);
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
