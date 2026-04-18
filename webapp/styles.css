@@ -793,6 +793,17 @@ body {
   text-align: left;
 }
 
+.instruction-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.instruction-title-row span {
+  min-width: 0;
+}
+
 .instruction-app-btn.active {
   border-color: rgba(36, 165, 255, 0.78);
   background: #06314f;
@@ -809,6 +820,17 @@ body {
   flex: 0 0 34px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+  object-fit: cover;
+  display: block;
+}
+
+.instruction-title-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.03);
   object-fit: cover;
   display: block;

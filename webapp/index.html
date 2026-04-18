@@ -129,11 +129,11 @@
         <div class="instruction-app-grid" id="instructionAppGrid">
           <button type="button" class="instruction-app-btn active" id="instructionAppVpnBtn" data-app="amneziavpn">
             <span class="instruction-app-name">AmneziaVPN</span>
-            <img class="instruction-app-icon" src="./assets/amnezia-vpn.svg" alt="AmneziaVPN" />
+            <img class="instruction-app-icon" id="instructionAppVpnIcon" alt="AmneziaVPN" />
           </button>
           <button type="button" class="instruction-app-btn" id="instructionAppWgBtn" data-app="amneziawg">
             <span class="instruction-app-name">AmneziaWG</span>
-            <img class="instruction-app-icon" src="./assets/amnezia-wg.svg" alt="AmneziaWG" />
+            <img class="instruction-app-icon" id="instructionAppWgIcon" alt="AmneziaWG" />
           </button>
         </div>
         <p class="instruction-note hidden" id="instructionAppLimitedNote">Приложение: AmneziaVPN</p>
@@ -155,7 +155,10 @@
         </div>
 
         <div class="instruction-card">
-          <h3 id="guideDownloadTitle">1 Скачайте приложение AmneziaVPN</h3>
+          <h3 class="instruction-title-row" id="guideDownloadTitle">
+            <span id="guideDownloadTitleText">1 Скачайте приложение AmneziaVPN</span>
+            <img class="instruction-title-icon" id="guideDownloadIcon" alt="AmneziaVPN" />
+          </h3>
           <p class="instruction-note" id="guideDownloadNote">С официального сайта Amnezia.</p>
           <a id="guideDownloadBtn" class="btn ghost instruction-download-btn" href="https://amnezia.org/ru/downloads" target="_blank" rel="noopener noreferrer">Скачать</a>
         </div>
