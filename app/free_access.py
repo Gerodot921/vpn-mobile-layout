@@ -384,3 +384,85 @@ async def free_access_cleanup_loop() -> None:
             logging.exception("Free access cleanup loop failed")
 
         await asyncio.sleep(_configured_cleanup_interval_seconds())
+
+
+async def send_free_access_reminders(bot) -> int:
+    """Send 10-minute warning reminders for expiring free access.
+    Returns count of reminders sent."""
+    now = _now_utc()
+    ten_minutes_later = now + timedelta(minutes=10)
+    reminder_sent_count = 0
+
+    with _state_lock:
+        state = _load_state()
+        for user_key, record in state.items():
+            try:
+                user_id = int(user_key)
+                expires_at = _parse_dt(record["expires_at"])
+            except Exception:
+                continue
+
+            # Check if expires between now and 10 minutes from now
+            if not (now < expires_at <= ten_minutes_later):
+                continue
+
+            # Skip if reminder already sent for this record
+            if record.get("reminder_sent_at"):
+                continue
+
+            # Mark reminder as sent
+            record["reminder_sent_at"] = now.isoformat()
+            state[user_key] = record
+            reminder_sent_count += 1
+
+        if reminder_sent_count > 0:
+            _save_state(state)
+
+    # Send messages asynchronously
+    from app.keyboards.inline import subscription_inline_keyboard
+    for user_key in list(state.keys()):
+        if not state[user_key].get("reminder_sent_at"):
+            continue
+
+        try:
+            user_id = int(user_key)
+        except Exception:
+            continue
+
+        expires_at_str = state[user_key].get("expires_at", "")
+        try:
+            expires_dt = _parse_dt(expires_at_str)
+            remaining_mins = int((expires_dt - now).total_seconds() // 60)
+            if remaining_mins < 0:
+                remaining_mins = 0
+        except Exception:
+            remaining_mins = 10
+
+        message = f"⏰ Ваш бесплатный доступ к SkullVPN заканчивается через {remaining_mins} минут!\n\nКупите подписку, чтобы продолжить пользоваться VPN без перерывов."
+
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=message,
+                reply_markup=subscription_inline_keyboard(),
+            )
+            logging.info("Sent expiry reminder to user_id=%s", user_id)
+        except Exception:
+            logging.warning("Failed to send expiry reminder to user_id=%s", user_id, exc_info=True)
+
+    return reminder_sent_count
+
+
+async def free_access_reminder_loop(bot) -> None:
+    """Periodically check and send free access expiry reminders."""
+    while True:
+        try:
+            sent = await send_free_access_reminders(bot)
+            if sent > 0:
+                logging.info("Sent %d free access expiry reminders", sent)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("Free access reminder loop failed")
+
+        await asyncio.sleep(60)  # Check every minute

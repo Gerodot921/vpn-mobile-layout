@@ -17,7 +17,6 @@ const rewardTimer = document.getElementById("rewardTimer");
 const rewardPanel = document.querySelector(".reward-panel");
 const adOverlay = document.getElementById("adOverlay");
 const adMedia = document.getElementById("adMedia");
-const adTitle = document.getElementById("adTitle");
 const adTimerText = document.getElementById("adTimerText");
 const adCaption = document.getElementById("adCaption");
 const refLinkInput = document.getElementById("refLink");
@@ -703,16 +702,14 @@ function renderAdCountdown(remainingSeconds) {
 
 
 function showAdOverlay(ad, watchSeconds) {
-  if (!adOverlay || !adMedia || !adTitle || !adCaption || !adTimerText) {
+  if (!adOverlay || !adMedia || !adCaption || !adTimerText) {
     return;
   }
 
   clearAdCountdownTimer();
   const imageUrl = typeof ad?.asset_url === "string" ? ad.asset_url : "";
-  const title = typeof ad?.title === "string" && ad.title ? ad.title : "Рекламное предложение";
   const totalSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0 ? watchSeconds : REWARD_WATCH_SECONDS;
 
-  adTitle.textContent = title;
   adCaption.textContent = `Просмотрите рекламу ${totalSeconds} секунд, чтобы открыть 1 час бесплатного VPN.`;
   adMedia.src = imageUrl;
   renderAdCountdown(totalSeconds);

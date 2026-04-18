@@ -8,7 +8,7 @@ from aiohttp import web
 from dotenv import load_dotenv
 
 from app.api import create_api_app
-from app.free_access import free_access_cleanup_loop
+from app.free_access import free_access_cleanup_loop, free_access_reminder_loop
 from app.handlers import callbacks_router, commands_router, menu_router, start_router, webapp_router
 from app.subscriptions import reminder_loop
 
@@ -62,17 +62,23 @@ async def main() -> None:
     dp = build_dispatcher()
     reminder_task = asyncio.create_task(reminder_loop(bot))
     free_access_cleanup_task = asyncio.create_task(free_access_cleanup_loop())
+    free_access_reminder_task = asyncio.create_task(free_access_reminder_loop(bot))
     try:
         await dp.start_polling(bot)
     finally:
         reminder_task.cancel()
         free_access_cleanup_task.cancel()
+        free_access_reminder_task.cancel()
         try:
             await reminder_task
         except asyncio.CancelledError:
             pass
         try:
             await free_access_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await free_access_reminder_task
         except asyncio.CancelledError:
             pass
         await api_runner.cleanup()
