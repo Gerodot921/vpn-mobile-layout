@@ -109,9 +109,6 @@ def _load_state() -> WireGuardState:
             if not isinstance(config_text, str) or not isinstance(config_filename, str):
                 continue
 
-            if config_filename != "SkullVPN.conf":
-                config_filename = "SkullVPN.conf"
-
             state["profiles"][key] = {
                 "profile_id": profile_id,
                 "user_id": user_id,
@@ -339,7 +336,8 @@ def _build_config_text(profile: WireGuardProfile) -> str:
 
 
 def _build_profile_filename(profile_id: str) -> str:
-    return "SkullVPN.conf"
+    safe_profile_id = profile_id.replace("/", "-").replace("\\", "-")
+    return f"skull-vpn-{safe_profile_id}.conf"
 
 
 def _build_profile(user_id: int, state: WireGuardState) -> WireGuardProfile:
@@ -418,7 +416,7 @@ def get_wireguard_config_text(user_id: int) -> str | None:
 def get_wireguard_config_filename(user_id: int) -> str:
     profile = get_wireguard_profile(user_id)
     if profile is None:
-        return "SkullVPN.conf"
+        return "skull-vpn-wireguard.conf"
     return profile["config_filename"]
 
 

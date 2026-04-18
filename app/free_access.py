@@ -77,13 +77,10 @@ def _load_state() -> FreeAccessState:
 
         vpn_protocol = value.get("vpn_protocol", "WireGuard")
         vpn_profile_name = value.get("vpn_profile_name", access_key)
-        vpn_config_name = value.get("vpn_config_name", "SkullVPN.conf")
+        vpn_config_name = value.get("vpn_config_name", f"skull-vpn-{access_key}.conf")
         vpn_configured = value.get("vpn_configured", False)
         peer_public_key = value.get("peer_public_key", "")
         peer_added_to_server = value.get("peer_added_to_server", False)
-
-        if vpn_config_name != "SkullVPN.conf":
-            vpn_config_name = "SkullVPN.conf"
 
         state[key] = {
             "access_key": access_key,
@@ -96,7 +93,7 @@ def _load_state() -> FreeAccessState:
             "source": source if isinstance(source, str) and source else "mini_app_ad",
             "vpn_protocol": vpn_protocol if isinstance(vpn_protocol, str) and vpn_protocol else "WireGuard",
             "vpn_profile_name": vpn_profile_name if isinstance(vpn_profile_name, str) and vpn_profile_name else access_key,
-            "vpn_config_name": vpn_config_name if isinstance(vpn_config_name, str) and vpn_config_name else "SkullVPN.conf",
+            "vpn_config_name": vpn_config_name if isinstance(vpn_config_name, str) and vpn_config_name else f"skull-vpn-{access_key}.conf",
             "vpn_configured": bool(vpn_configured),
             "peer_public_key": peer_public_key if isinstance(peer_public_key, str) else "",
             "peer_added_to_server": bool(peer_added_to_server),
