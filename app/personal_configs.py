@@ -96,6 +96,9 @@ def _load_state() -> PersonalConfigsState:
         ]):
             continue
 
+        if config_filename != "SkullVPN.conf":
+            config_filename = "SkullVPN.conf"
+
         state[key] = {
             "config_id": config_id,
             "config_filename": config_filename,
@@ -426,7 +429,7 @@ def create_personal_configs(count: int, days: int) -> list[PersonalConfigRecord]
             now = _now_utc()
             expires_at = (now + timedelta(days=days)).isoformat()
             config_id = _new_config_id()
-            config_filename = f"skull-vpn-{config_id}.conf"
+            config_filename = "SkullVPN.conf"
             config_text = _build_config_text(private_key, preshared_key, address)
 
             added_to_server = add_peer_to_server_by_values(
