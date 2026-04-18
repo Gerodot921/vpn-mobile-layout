@@ -366,14 +366,13 @@ function renderInstructionSelection() {
   const isLimited = !supportsWgForPlatform(state.instruction.platform);
   if (isLimited) {
     state.instruction.app = "amneziavpn";
+  } else if (state.instruction.app !== "amneziawg" && state.instruction.app !== "amneziavpn") {
+    state.instruction.app = "amneziavpn";
   }
 
   instructionAppWgBtn?.classList.toggle("hidden", isLimited);
-  instructionAppLabel?.classList.toggle("hidden", isLimited);
   instructionAppGrid?.classList.toggle("single-choice", isLimited);
-  instructionAppGrid?.classList.toggle("hidden", isLimited);
   instructionAppVpnBtn?.classList.toggle("single-choice", isLimited);
-  instructionAppLimitedNote?.classList.toggle("hidden", !isLimited);
 
   instructionAppVpnBtn?.classList.toggle("active", state.instruction.app === "amneziavpn");
   instructionAppWgBtn?.classList.toggle("active", state.instruction.app === "amneziawg");
@@ -383,6 +382,10 @@ function renderInstructionSelection() {
   }
   if (instructionAppWgIcon) {
     instructionAppWgIcon.src = INSTRUCTION_APP_ICON_DATA.amneziawg;
+  }
+
+  if (instructionAppLimitedNote) {
+    instructionAppLimitedNote.textContent = `Выбрано: ${selectedInstructionAppName()}`;
   }
 }
 
