@@ -16,6 +16,7 @@ FREE_ACCESS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "free_
 FREE_ACCESS_STATS_PATH = Path(__file__).resolve().parents[1] / "data" / "free_access_stats.json"
 DEFAULT_FREE_ACCESS_HOURS = 1
 FREE_ACCESS_CLEANUP_INTERVAL_SECONDS = 60
+FREE_ACCESS_REMINDER_THRESHOLDS = (10, 5, 1)
 
 _state_lock = Lock()
 
@@ -25,6 +26,7 @@ class FreeAccessRecord(TypedDict):
     granted_at: str
     expires_at: str
     claims_count: int
+    reminder_thresholds_sent: list[int]
     source: str
     vpn_protocol: str
     vpn_profile_name: str
@@ -62,6 +64,7 @@ def _load_state() -> FreeAccessState:
         granted_at = value.get("granted_at")
         expires_at = value.get("expires_at")
         claims_count = value.get("claims_count", 0)
+        reminder_thresholds_sent = value.get("reminder_thresholds_sent", [])
         source = value.get("source", "mini_app_ad")
 
         if not isinstance(access_key, str) or not isinstance(granted_at, str) or not isinstance(expires_at, str):
@@ -69,6 +72,8 @@ def _load_state() -> FreeAccessState:
 
         if not isinstance(claims_count, int):
             claims_count = 0
+        if not isinstance(reminder_thresholds_sent, list):
+            reminder_thresholds_sent = []
 
         vpn_protocol = value.get("vpn_protocol", "WireGuard")
         vpn_profile_name = value.get("vpn_profile_name", access_key)
@@ -82,6 +87,9 @@ def _load_state() -> FreeAccessState:
             "granted_at": granted_at,
             "expires_at": expires_at,
             "claims_count": claims_count,
+            "reminder_thresholds_sent": [
+                int(item) for item in reminder_thresholds_sent if isinstance(item, int)
+            ],
             "source": source if isinstance(source, str) and source else "mini_app_ad",
             "vpn_protocol": vpn_protocol if isinstance(vpn_protocol, str) and vpn_protocol else "WireGuard",
             "vpn_profile_name": vpn_profile_name if isinstance(vpn_profile_name, str) and vpn_profile_name else access_key,
@@ -315,6 +323,7 @@ def grant_free_access(
             "granted_at": now.isoformat(),
             "expires_at": (now + timedelta(hours=effective_hours)).isoformat(),
             "claims_count": claims_count,
+            "reminder_thresholds_sent": [],
             "source": source,
             "vpn_protocol": "WireGuard",
             "vpn_profile_name": profile["profile_id"],
@@ -387,11 +396,20 @@ async def free_access_cleanup_loop() -> None:
 
 
 async def send_free_access_reminders(bot) -> int:
-    """Send 10-minute warning reminders for expiring free access.
-    Returns count of reminders sent."""
+    """Send reminder alerts at 10, 5, and 1 minute before expiry."""
     now = _now_utc()
-    ten_minutes_later = now + timedelta(minutes=10)
     reminder_sent_count = 0
+
+    def _minutes_left(expires_at: datetime) -> int:
+        remaining_seconds = int((expires_at - now).total_seconds())
+        if remaining_seconds <= 0:
+            return 0
+        return (remaining_seconds + 59) // 60
+
+    def _format_minutes_text(minutes_left: int) -> str:
+        if minutes_left == 1:
+            return "1 минуту"
+        return f"{minutes_left} минут"
 
     with _state_lock:
         state = _load_state()
@@ -402,43 +420,55 @@ async def send_free_access_reminders(bot) -> int:
             except Exception:
                 continue
 
-            # Check if expires between now and 10 minutes from now
-            if not (now < expires_at <= ten_minutes_later):
+            if expires_at <= now:
                 continue
 
-            # Skip if reminder already sent for this record
-            if record.get("reminder_sent_at"):
+            minutes_left = _minutes_left(expires_at)
+            if minutes_left not in FREE_ACCESS_REMINDER_THRESHOLDS:
                 continue
 
-            # Mark reminder as sent
-            record["reminder_sent_at"] = now.isoformat()
+            sent_thresholds = record.get("reminder_thresholds_sent", [])
+            if not isinstance(sent_thresholds, list):
+                sent_thresholds = []
+            sent_thresholds = [int(item) for item in sent_thresholds if isinstance(item, int)]
+            if minutes_left in sent_thresholds:
+                continue
+
+            record["reminder_thresholds_sent"] = sorted(set(sent_thresholds + [minutes_left]), reverse=True)
             state[user_key] = record
             reminder_sent_count += 1
 
         if reminder_sent_count > 0:
             _save_state(state)
 
-    # Send messages asynchronously
     from app.keyboards.inline import subscription_inline_keyboard
-    for user_key in list(state.keys()):
-        if not state[user_key].get("reminder_sent_at"):
-            continue
-
+    for user_key, record in state.items():
         try:
             user_id = int(user_key)
         except Exception:
             continue
 
-        expires_at_str = state[user_key].get("expires_at", "")
-        try:
-            expires_dt = _parse_dt(expires_at_str)
-            remaining_mins = int((expires_dt - now).total_seconds() // 60)
-            if remaining_mins < 0:
-                remaining_mins = 0
-        except Exception:
-            remaining_mins = 10
+        if not any(threshold in record.get("reminder_thresholds_sent", []) for threshold in FREE_ACCESS_REMINDER_THRESHOLDS):
+            continue
 
-        message = f"⏰ Ваш бесплатный доступ к SkullVPN заканчивается через {remaining_mins} минут!\n\nКупите подписку, чтобы продолжить пользоваться VPN без перерывов."
+        minutes_left = 0
+        try:
+            expires_at = _parse_dt(record["expires_at"])
+            minutes_left = _minutes_left(expires_at)
+        except Exception:
+            continue
+
+        if minutes_left not in FREE_ACCESS_REMINDER_THRESHOLDS:
+            continue
+
+        sent_thresholds = record.get("reminder_thresholds_sent", [])
+        if minutes_left not in sent_thresholds:
+            continue
+
+        message = (
+            f"⏰ Ваш бесплатный доступ к SkullVPN заканчивается через {_format_minutes_text(minutes_left)}!\n\n"
+            "Купите любой из доступных тарифов, чтобы продолжить пользоваться VPN без перерывов."
+        )
 
         try:
             await bot.send_message(
