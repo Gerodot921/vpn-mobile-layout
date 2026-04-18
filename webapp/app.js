@@ -53,13 +53,20 @@ const guideDownloadTitleText = document.getElementById("guideDownloadTitleText")
 const guideDownloadNote = document.getElementById("guideDownloadNote");
 const guideDownloadBtn = document.getElementById("guideDownloadBtn");
 const guideDownloadIcon = document.getElementById("guideDownloadIcon");
+const guideConfigTitle = document.getElementById("guideConfigTitle");
+const guideConfigNote = document.getElementById("guideConfigNote");
+const guideStep2Image = document.getElementById("guideStep2Image");
+const guideStep2ImageNote = document.getElementById("guideStep2ImageNote");
 const guideConfiguratorValue = document.getElementById("guideConfiguratorValue");
 const guideConfiguratorExample = document.getElementById("guideConfiguratorExample");
 const guideCopyConfiguratorBtn = document.getElementById("guideCopyConfiguratorBtn");
 const guideInsertTitle = document.getElementById("guideInsertTitle");
-const guideInsertHint = document.getElementById("guideInsertHint");
-const guideShot1Label = document.getElementById("guideShot1Label");
-const guideShot2Label = document.getElementById("guideShot2Label");
+const guideInsertSteps = document.getElementById("guideInsertSteps");
+const guideStep3Image = document.getElementById("guideStep3Image");
+const guideStep3ImageNote = document.getElementById("guideStep3ImageNote");
+const guideFinishTitle = document.getElementById("guideFinishTitle");
+const guideStep4Image = document.getElementById("guideStep4Image");
+const guideStep4ImageNote = document.getElementById("guideStep4ImageNote");
 const serversPanel = document.getElementById("serversPanel");
 
 const INSTALL_AMNEZIA_URL = "https://amnezia.org/ru/downloads";
@@ -82,16 +89,22 @@ const INSTRUCTION_PLATFORM_LABELS = {
 
 const INSTRUCTION_APP_HINTS = {
   amneziavpn: {
-    step3Title: "3 Вставьте конфигуратор в AmneziaVPN и включите VPN",
-    step3Hint: "В AmneziaVPN откройте добавление профиля и выберите импорт из буфера обмена или по ссылке.",
-    shot1: "Скриншот 1: AmneziaVPN — экран добавления профиля",
-    shot2: "Скриншот 2: AmneziaVPN — вставка конфигуратора",
+    step3Title: "3. Вставьте конфигуратор в AmneziaVPN и включите VPN.",
+    step3Steps: [
+      "Откройте AmneziaVPN и перейдите к добавлению подключения.",
+      "Выберите импорт профиля из файла .conf.",
+      "Подтвердите подключение и включите VPN.",
+    ],
+    step4Title: "4. Создалось новое подключение — можно подключаться.",
   },
   amneziawg: {
-    step3Title: "3 Вставьте конфигуратор в AmneziaWG и включите VPN",
-    step3Hint: "В AmneziaWG откройте добавление туннеля и импортируйте конфигуратор из буфера обмена или ссылки.",
-    shot1: "Скриншот 1: AmneziaWG — экран добавления туннеля",
-    shot2: "Скриншот 2: AmneziaWG — импорт конфигуратора",
+    step3Title: "3. Вставьте конфигуратор в AmneziaWG и включите VPN.",
+    step3Steps: [
+      "Откройте AmneziaWG и нажмите добавление туннеля.",
+      "Импортируйте ранее скачанный файл .conf.",
+      "Подтвердите подключение и включите туннель.",
+    ],
+    step4Title: "4. Создалось новое подключение — можно подключаться.",
   },
 };
 
@@ -117,6 +130,12 @@ const INSTRUCTION_DOWNLOAD_URLS = {
 const INSTRUCTION_APP_ICON_DATA = {
   amneziavpn: "https://images.seeklogo.com/logo-png/48/1/amnezia-vpn-logo-png_seeklogo-488391.png",
   amneziawg: "https://play-lh.googleusercontent.com/gR0IXMSLeKkmKUAXcVCowZ95fIPPjsr2KcaTWA2Vgj6QieELc3KLMFOYGdN9iypECJY",
+};
+
+const IOS_AMNEZIA_VPN_GUIDE_IMAGES = {
+  step2: "./assets/ios.1.png",
+  step3: "./assets/пояснялка2-0.png",
+  step4: "./assets/Pasted image.png",
 };
 
 const serverConfigs = [
@@ -395,9 +414,34 @@ function renderInstructionGuide() {
   const platformName = selectedInstructionPlatformName();
   const configValue = buildConfiguratorValue();
   const appHints = INSTRUCTION_APP_HINTS[state.instruction.app] || INSTRUCTION_APP_HINTS.amneziavpn;
+  const isIosAmneziaVpn = state.instruction.platform === "ios" && state.instruction.app === "amneziavpn";
+
+  const setGuideImage = (imgElement, noteElement, imageSrc, fallbackText) => {
+    if (!imgElement || !noteElement) {
+      return;
+    }
+
+    if (!imageSrc) {
+      imgElement.classList.add("hidden");
+      noteElement.textContent = "";
+      return;
+    }
+
+    imgElement.classList.remove("hidden");
+    noteElement.textContent = "";
+    imgElement.onerror = () => {
+      imgElement.classList.add("hidden");
+      noteElement.textContent = fallbackText;
+    };
+    imgElement.onload = () => {
+      noteElement.textContent = "";
+      imgElement.classList.remove("hidden");
+    };
+    imgElement.src = imageSrc;
+  };
 
   if (guideDownloadTitleText) {
-    guideDownloadTitleText.textContent = `1 Скачайте приложение ${appName}`;
+    guideDownloadTitleText.textContent = `1. Скачайте приложение ${appName}`;
   }
   if (guideDownloadNote) {
     guideDownloadNote.textContent = `Для ${platformName} с официального сайта Amnezia.`;
@@ -409,6 +453,12 @@ function renderInstructionGuide() {
     guideDownloadIcon.src = INSTRUCTION_APP_ICON_DATA[state.instruction.app] || INSTRUCTION_APP_ICON_DATA.amneziavpn;
     guideDownloadIcon.alt = appName;
   }
+  if (guideConfigTitle) {
+    guideConfigTitle.textContent = "2. Скачайте предоставленный конфигуратор.";
+  }
+  if (guideConfigNote) {
+    guideConfigNote.textContent = "Получите файл в Telegram и скачайте его на устройство.";
+  }
   if (guideConfiguratorValue) {
     guideConfiguratorValue.value = configValue;
   }
@@ -418,14 +468,43 @@ function renderInstructionGuide() {
   if (guideInsertTitle) {
     guideInsertTitle.textContent = appHints.step3Title;
   }
-  if (guideInsertHint) {
-    guideInsertHint.textContent = appHints.step3Hint;
+  if (guideInsertSteps) {
+    const stepItems = isIosAmneziaVpn
+      ? [
+          "1) Откройте приложение AmneziaVPN и нажмите на иконку ➕ (плюс) или на кнопку Приступим, если у вас не было других подключений.",
+          "2) Выберите вариант подключения Файл с настройками подключения.",
+          "3) Выберите ранее скачанный файл .conf и нажмите Продолжить → Подключиться.",
+        ]
+      : appHints.step3Steps;
+    guideInsertSteps.innerHTML = stepItems.map((item) => `<li>${item}</li>`).join("");
   }
-  if (guideShot1Label) {
-    guideShot1Label.textContent = appHints.shot1;
+  if (guideFinishTitle) {
+    guideFinishTitle.textContent = appHints.step4Title || "4. Создалось новое подключение — можно подключаться.";
   }
-  if (guideShot2Label) {
-    guideShot2Label.textContent = appHints.shot2;
+
+  if (isIosAmneziaVpn) {
+    setGuideImage(
+      guideStep2Image,
+      guideStep2ImageNote,
+      IOS_AMNEZIA_VPN_GUIDE_IMAGES.step2,
+      "Добавьте файл webapp/assets/ios.1.png"
+    );
+    setGuideImage(
+      guideStep3Image,
+      guideStep3ImageNote,
+      IOS_AMNEZIA_VPN_GUIDE_IMAGES.step3,
+      "Добавьте файл webapp/assets/пояснялка2-0.png"
+    );
+    setGuideImage(
+      guideStep4Image,
+      guideStep4ImageNote,
+      IOS_AMNEZIA_VPN_GUIDE_IMAGES.step4,
+      "Добавьте файл webapp/assets/Pasted image.png"
+    );
+  } else {
+    setGuideImage(guideStep2Image, guideStep2ImageNote, "", "");
+    setGuideImage(guideStep3Image, guideStep3ImageNote, "", "");
+    setGuideImage(guideStep4Image, guideStep4ImageNote, "", "");
   }
 }
 

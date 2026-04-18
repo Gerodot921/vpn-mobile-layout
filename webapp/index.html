@@ -156,7 +156,7 @@
 
         <div class="instruction-card">
           <h3 class="instruction-title-row" id="guideDownloadTitle">
-            <span id="guideDownloadTitleText">1 Скачайте приложение AmneziaVPN</span>
+            <span id="guideDownloadTitleText">1. Скачайте приложение AmneziaVPN</span>
             <img class="instruction-title-icon" id="guideDownloadIcon" alt="AmneziaVPN" referrerpolicy="no-referrer" loading="eager" decoding="async" />
           </h3>
           <p class="instruction-note" id="guideDownloadNote">С официального сайта Amnezia.</p>
@@ -164,21 +164,54 @@
         </div>
 
         <div class="instruction-card">
-          <h3>2 Скопируйте ваш VPN конфигуратор</h3>
-          <div class="instruction-config-row">
+          <h3 id="guideConfigTitle">2. Скачайте предоставленный конфигуратор.</h3>
+          <p class="instruction-note" id="guideConfigNote">Получите файл в Telegram и скачайте его на устройство.</p>
+          <img
+            id="guideStep2Image"
+            class="instruction-guide-image"
+            alt="Шаг 2: скачивание конфигуратора"
+            loading="lazy"
+            decoding="async"
+          />
+          <p class="instruction-note instruction-image-note" id="guideStep2ImageNote"></p>
+        </div>
+
+        <div class="instruction-card">
+          <h3 id="guideInsertTitle">3. Вставьте конфигуратор в приложение и включите VPN.</h3>
+          <ol class="instruction-steps" id="guideInsertSteps">
+            <li>Откройте приложение AmneziaVPN и нажмите на иконку ➕ (плюс) или на кнопку Приступим, если у вас не было других подключений.</li>
+            <li>Выберите вариант подключения Файл с настройками подключения.</li>
+            <li>Выберите ранее скачанный файл .conf и нажмите Продолжить → Подключиться.</li>
+          </ol>
+          <img
+            id="guideStep3Image"
+            class="instruction-guide-image"
+            alt="Шаг 3: импорт файла и подключение"
+            loading="lazy"
+            decoding="async"
+          />
+          <p class="instruction-note instruction-image-note" id="guideStep3ImageNote"></p>
+        </div>
+
+        <div class="instruction-card">
+          <h3 id="guideFinishTitle">4. Создалось новое подключение — можно подключаться.</h3>
+          <img
+            id="guideStep4Image"
+            class="instruction-guide-image"
+            alt="Шаг 4: новое подключение создано"
+            loading="lazy"
+            decoding="async"
+          />
+          <p class="instruction-note instruction-image-note" id="guideStep4ImageNote"></p>
+        </div>
+
+        <div class="instruction-card hidden">
+          <h3>Служебный блок</h3>
+          <div class="instruction-config-row hidden">
             <input id="guideConfiguratorValue" readonly value="amnezia://config/your-configurator" />
             <button type="button" class="btn tiny" id="guideCopyConfiguratorBtn">Копировать</button>
           </div>
           <p class="instruction-note" id="guideConfiguratorExample">Пример: amnezia://config/your-configurator</p>
-        </div>
-
-        <div class="instruction-card">
-          <h3 id="guideInsertTitle">3 Вставьте конфигуратор в приложение и включите VPN</h3>
-          <p class="instruction-note" id="guideInsertHint">Откройте приложение и используйте импорт через ссылку/буфер обмена.</p>
-          <div class="instruction-screenshots-placeholder">
-            <div class="instruction-placeholder-box" id="guideShot1Label">Скриншот 1 (позже)</div>
-            <div class="instruction-placeholder-box" id="guideShot2Label">Скриншот 2 (позже)</div>
-          </div>
         </div>
 
         <div class="instruction-actions-two">

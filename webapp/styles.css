@@ -879,6 +879,40 @@ body {
   font-size: 13px;
 }
 
+.instruction-steps {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: #cfe2f8;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.instruction-steps li {
+  margin-bottom: 8px;
+}
+
+.instruction-steps li:last-child {
+  margin-bottom: 0;
+}
+
+.instruction-guide-image {
+  width: 100%;
+  height: auto;
+  max-height: 380px;
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid rgba(149, 170, 199, 0.38);
+  background: rgba(2, 9, 15, 0.75);
+  display: block;
+}
+
+.instruction-image-note {
+  margin-top: 8px;
+  margin-bottom: 0;
+  color: #8fabc8;
+  font-size: 12px;
+}
+
 .instruction-config-row {
   display: grid;
   gap: 8px;
