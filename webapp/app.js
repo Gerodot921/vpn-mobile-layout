@@ -117,15 +117,12 @@ const INSTRUCTION_DOWNLOAD_URLS = {
 const INSTRUCTION_APP_ICON_DATA = {
   amneziavpn: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
     <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect width="512" height="512" rx="96" fill="#111317"/>
-      <path d="M110 266C110 166 185 98 258 98C343 98 398 161 398 241C398 322 334 386 244 386C190 386 154 365 128 330" stroke="url(#paint0_linear_1)" stroke-width="34" stroke-linecap="round"/>
-      <path d="M147 170C175 133 213 110 258 110C296 110 326 122 352 142" stroke="#7DE8D7" stroke-width="28" stroke-linecap="round"/>
-      <path d="M330 128C355 142 376 161 391 185" stroke="#FFE7EF" stroke-width="28" stroke-linecap="round"/>
-      <path d="M113 323C136 340 166 353 198 362" stroke="#8E7EE6" stroke-width="28" stroke-linecap="round"/>
-      <path d="M221 122L264 236L205 237L168 349" stroke="#9CCBF5" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M270 138L318 250H274L234 345" stroke="#FFE3C8" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M351 193C331 230 318 268 317 314" stroke="#FF9C24" stroke-width="34" stroke-linecap="round"/>
-      <path d="M256 236L300 236" stroke="#F3F0F8" stroke-width="28" stroke-linecap="round"/>
+      <rect width="512" height="512" rx="96" fill="#101216"/>
+      <rect x="84" y="84" width="344" height="344" rx="112" stroke="url(#paint0_linear_1)" stroke-width="34"/>
+      <path d="M158 224C158 170 202 128 256 128C310 128 354 170 354 224C354 274 318 314 274 328V352H238V328C194 314 158 274 158 224Z" fill="#F6F0F6"/>
+      <path d="M186 214C198 180 227 157 256 157C285 157 314 180 326 214" stroke="#7DE8D7" stroke-width="24" stroke-linecap="round"/>
+      <path d="M176 258C195 286 223 301 256 301C289 301 317 286 336 258" stroke="#FF9A1F" stroke-width="24" stroke-linecap="round"/>
+      <path d="M256 176L283 229L256 252L229 229L256 176Z" fill="#8B7EE7"/>
       <defs>
         <linearGradient id="paint0_linear_1" x1="115" y1="118" x2="394" y2="376" gradientUnits="userSpaceOnUse">
           <stop stop-color="#7FD6D0"/>
@@ -137,23 +134,15 @@ const INSTRUCTION_APP_ICON_DATA = {
   `)}`,
   amneziawg: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
     <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect width="512" height="512" rx="96" fill="#111317"/>
-      <path d="M109 205C109 130 173 94 256 94C339 94 403 132 403 207C403 284 343 356 256 356C168 356 109 282 109 205Z" stroke="url(#paint0_linear_2)" stroke-width="32"/>
-      <path d="M165 168C182 141 214 123 256 123C295 123 327 139 348 164" stroke="#7CDA4E" stroke-width="28" stroke-linecap="round"/>
-      <path d="M346 163C370 182 385 211 390 242" stroke="#FFC23A" stroke-width="28" stroke-linecap="round"/>
-      <path d="M329 305C309 329 283 344 256 344C217 344 186 328 162 300" stroke="#5F73CC" stroke-width="28" stroke-linecap="round"/>
-      <path d="M124 285C137 308 157 327 181 341" stroke="#C8A0D8" stroke-width="28" stroke-linecap="round"/>
-      <path d="M378 284C365 307 345 326 321 340" stroke="#FFAF3E" stroke-width="28" stroke-linecap="round"/>
-      <path d="M256 147L298 274H265L231 344L194 273H214L256 147Z" fill="url(#paint1_linear_2)"/>
+      <rect width="512" height="512" rx="96" fill="#101216"/>
+      <rect x="84" y="84" width="344" height="344" rx="112" stroke="url(#paint0_linear_2)" stroke-width="34"/>
+      <path d="M176 320L220 192L256 282L292 192L336 320" stroke="#F6F0F6" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M236 190L256 236L276 190" stroke="#7CDA4E" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M208 298L256 258L304 298" stroke="#FFAF3E" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
       <defs>
         <linearGradient id="paint0_linear_2" x1="109" y1="94" x2="403" y2="356" gradientUnits="userSpaceOnUse">
           <stop stop-color="#7EE151"/>
           <stop offset="0.5" stop-color="#F8D84A"/>
-          <stop offset="1" stop-color="#FF9A1F"/>
-        </linearGradient>
-        <linearGradient id="paint1_linear_2" x1="194" y1="147" x2="298" y2="344" gradientUnits="userSpaceOnUse">
-          <stop stop-color="#D8F36C"/>
-          <stop offset="0.48" stop-color="#4D6AC8"/>
           <stop offset="1" stop-color="#FF9A1F"/>
         </linearGradient>
       </defs>

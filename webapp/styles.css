@@ -821,7 +821,8 @@ body {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.03);
-  object-fit: cover;
+  object-fit: contain;
+  padding: 2px;
   display: block;
 }
 
@@ -832,7 +833,8 @@ body {
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.03);
-  object-fit: cover;
+  object-fit: contain;
+  padding: 2px;
   display: block;
 }
 
