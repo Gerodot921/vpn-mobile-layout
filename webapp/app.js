@@ -133,9 +133,9 @@ const INSTRUCTION_APP_ICON_DATA = {
 };
 
 const IOS_AMNEZIA_VPN_GUIDE_IMAGES = {
-  step2: "./assets/ios.1.png",
+  step2: "./assets/пояснялка ios.1.png",
   step3: "./assets/пояснялка2-0.png",
-  step4: "./assets/Pasted image.png",
+  step4: "./assets/пояснялка ios.3.png",
 };
 
 const serverConfigs = [
@@ -487,7 +487,7 @@ function renderInstructionGuide() {
       guideStep2Image,
       guideStep2ImageNote,
       IOS_AMNEZIA_VPN_GUIDE_IMAGES.step2,
-      "Добавьте файл webapp/assets/ios.1.png"
+      "Добавьте файл webapp/assets/пояснялка ios.1.png"
     );
     setGuideImage(
       guideStep3Image,
@@ -499,7 +499,7 @@ function renderInstructionGuide() {
       guideStep4Image,
       guideStep4ImageNote,
       IOS_AMNEZIA_VPN_GUIDE_IMAGES.step4,
-      "Добавьте файл webapp/assets/Pasted image.png"
+      "Добавьте файл webapp/assets/пояснялка ios.3.png"
     );
   } else {
     setGuideImage(guideStep2Image, guideStep2ImageNote, "", "");
