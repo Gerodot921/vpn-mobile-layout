@@ -778,19 +778,40 @@ body {
 }
 
 .instruction-app-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   border: 1px solid rgba(36, 165, 255, 0.45);
-  border-radius: 999px;
-  background: #02233a;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(2, 35, 58, 0.96), rgba(4, 26, 45, 0.96));
   color: #eaf3ff;
   font-weight: 500;
   font-size: 13px;
-  padding: 8px 11px;
+  padding: 9px 10px 9px 12px;
   cursor: pointer;
+  text-align: left;
 }
 
 .instruction-app-btn.active {
   border-color: rgba(36, 165, 255, 0.78);
   background: #06314f;
+}
+
+.instruction-app-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.instruction-app-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+  object-fit: cover;
+  display: block;
 }
 
 .instruction-app-grid.single-choice {
