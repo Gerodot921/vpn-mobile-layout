@@ -133,9 +133,9 @@ const INSTRUCTION_APP_ICON_DATA = {
 };
 
 const IOS_AMNEZIA_VPN_GUIDE_IMAGES = {
-  step2: "./assets/ios-step2.png",
-  step3: "./assets/ios-step3.png",
-  step4: "./assets/ios-step4.png",
+  step2: "/assets/ios-step2.png",
+  step3: "/assets/ios-step3.png",
+  step4: "/assets/ios-step4.png",
 };
 
 const serverConfigs = [
