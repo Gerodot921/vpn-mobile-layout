@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import secrets
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
 from app.wireguard import add_peer_to_server_by_values, remove_peer_from_server
 
 PERSONAL_CONFIGS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_configs.json"
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
+PERSONAL_CONFIGS_TABLE = "personal_configs"
 
 DEFAULT_ENDPOINT_PORT = 51820
 DEFAULT_CLIENT_NETWORK_PREFIX = "10.66.66"
@@ -58,65 +61,161 @@ def _parse_dt(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _connect() -> sqlite3.Connection:
+    STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {PERSONAL_CONFIGS_TABLE} (
+            config_id TEXT PRIMARY KEY,
+            config_filename TEXT NOT NULL,
+            config_text TEXT NOT NULL,
+            address TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            preshared_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            added_to_server INTEGER NOT NULL,
+            revoked_at TEXT,
+            assigned_user_id INTEGER,
+            assigned_username TEXT,
+            assigned_at TEXT
+        )
+        """
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{PERSONAL_CONFIGS_TABLE}_assigned_user_id ON {PERSONAL_CONFIGS_TABLE}(assigned_user_id)"
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{PERSONAL_CONFIGS_TABLE}_expires_at ON {PERSONAL_CONFIGS_TABLE}(expires_at)"
+    )
+    return connection
+
+
+def _row_to_record(row: tuple[Any, ...]) -> tuple[str, PersonalConfigRecord]:
+    config_id = str(row[0])
+    return config_id, {
+        "config_id": config_id,
+        "config_filename": str(row[1]),
+        "config_text": str(row[2]),
+        "address": str(row[3]),
+        "public_key": str(row[4]),
+        "private_key": str(row[5]),
+        "preshared_key": str(row[6]),
+        "created_at": str(row[7]),
+        "expires_at": str(row[8]),
+        "added_to_server": bool(row[9]),
+        "revoked_at": str(row[10]) if row[10] is not None else None,
+        "assigned_user_id": int(row[11]) if row[11] is not None else None,
+        "assigned_username": str(row[12]) if isinstance(row[12], str) and row[12] else None,
+        "assigned_at": str(row[13]) if row[13] is not None else None,
+    }
+
+
+def _encode_state_value(record: PersonalConfigRecord) -> tuple[Any, ...]:
+    return (
+        record.get("config_filename") or "",
+        record.get("config_text") or "",
+        record.get("address") or "",
+        record.get("public_key") or "",
+        record.get("private_key") or "",
+        record.get("preshared_key") or "",
+        record.get("created_at") or _now_utc().isoformat(),
+        record.get("expires_at") or _now_utc().isoformat(),
+        1 if bool(record.get("added_to_server", False)) else 0,
+        record.get("revoked_at"),
+        record.get("assigned_user_id"),
+        record.get("assigned_username"),
+        record.get("assigned_at"),
+    )
+
+
+def _ensure_seeded() -> None:
+    with _connect() as connection:
+        existing = connection.execute(f"SELECT COUNT(*) FROM {PERSONAL_CONFIGS_TABLE}").fetchone()
+        if existing and int(existing[0]) > 0:
+            return
+
+        raw_data = load_json_file(PERSONAL_CONFIGS_STORAGE_PATH, {})
+        if not isinstance(raw_data, dict) or not raw_data:
+            return
+
+        for key, value in raw_data.items():
+            if not isinstance(key, str) or not isinstance(value, dict):
+                continue
+
+            config_id = value.get("config_id")
+            config_filename = value.get("config_filename")
+            config_text = value.get("config_text")
+            address = value.get("address")
+            public_key = value.get("public_key")
+            private_key = value.get("private_key")
+            preshared_key = value.get("preshared_key")
+            created_at = value.get("created_at")
+            expires_at = value.get("expires_at")
+
+            if not all(isinstance(item, str) for item in [config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at]):
+                continue
+
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {PERSONAL_CONFIGS_TABLE}
+                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    config_id,
+                    config_filename,
+                    config_text,
+                    address,
+                    public_key,
+                    private_key,
+                    preshared_key,
+                    created_at,
+                    expires_at,
+                    1 if bool(value.get("added_to_server", False)) else 0,
+                    value.get("revoked_at") if isinstance(value.get("revoked_at"), str) else None,
+                    value.get("assigned_user_id") if isinstance(value.get("assigned_user_id"), int) else None,
+                    value.get("assigned_username") if isinstance(value.get("assigned_username"), str) and value.get("assigned_username") else None,
+                    value.get("assigned_at") if isinstance(value.get("assigned_at"), str) and value.get("assigned_at") else None,
+                ),
+            )
+
+        connection.commit()
+
+
 def _load_state() -> PersonalConfigsState:
-    raw_data = load_json_file(PERSONAL_CONFIGS_STORAGE_PATH, {})
-    if not isinstance(raw_data, dict):
-        return {}
-
+    _ensure_seeded()
     state: PersonalConfigsState = {}
-    for key, value in raw_data.items():
-        if not isinstance(key, str) or not isinstance(value, dict):
-            continue
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at FROM {PERSONAL_CONFIGS_TABLE}"
+        ).fetchall()
 
-        config_id = value.get("config_id")
-        config_filename = value.get("config_filename")
-        config_text = value.get("config_text")
-        address = value.get("address")
-        public_key = value.get("public_key")
-        private_key = value.get("private_key")
-        preshared_key = value.get("preshared_key")
-        created_at = value.get("created_at")
-        expires_at = value.get("expires_at")
-        added_to_server = value.get("added_to_server", False)
-        revoked_at = value.get("revoked_at")
-        assigned_user_id = value.get("assigned_user_id")
-        assigned_username = value.get("assigned_username")
-        assigned_at = value.get("assigned_at")
-
-        if not all(isinstance(item, str) for item in [
-            config_id,
-            config_filename,
-            config_text,
-            address,
-            public_key,
-            private_key,
-            preshared_key,
-            created_at,
-            expires_at,
-        ]):
-            continue
-
-        state[key] = {
-            "config_id": config_id,
-            "config_filename": config_filename,
-            "config_text": config_text,
-            "address": address,
-            "public_key": public_key,
-            "private_key": private_key,
-            "preshared_key": preshared_key,
-            "created_at": created_at,
-            "expires_at": expires_at,
-            "added_to_server": bool(added_to_server),
-            "revoked_at": revoked_at if isinstance(revoked_at, str) else None,
-            "assigned_user_id": assigned_user_id if isinstance(assigned_user_id, int) else None,
-            "assigned_username": assigned_username if isinstance(assigned_username, str) and assigned_username else None,
-            "assigned_at": assigned_at if isinstance(assigned_at, str) and assigned_at else None,
-        }
+    for row in rows:
+        config_id, record = _row_to_record(row)
+        state[config_id] = record
 
     return state
 
 
 def _save_state(state: PersonalConfigsState) -> None:
+    with _connect() as connection:
+        connection.execute(f"DELETE FROM {PERSONAL_CONFIGS_TABLE}")
+        for config_id, record in state.items():
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {PERSONAL_CONFIGS_TABLE}
+                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (config_id, *_encode_state_value(record)),
+            )
+        connection.commit()
+
     save_json_file(PERSONAL_CONFIGS_STORAGE_PATH, state)
 
 
