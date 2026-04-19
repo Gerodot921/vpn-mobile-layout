@@ -78,8 +78,6 @@
         <p class="warning hidden" id="timeWarning">Скоро закончится</p>
         <div class="tariff-list" id="tariffList"></div>
         <p class="tiny-note" id="selectedTariffHint">Выбран тариф: Базовый</p>
-        <div class="payment-methods" id="paymentMethods"></div>
-        <p class="tiny-note" id="paymentStatusHint">Выберите метод оплаты и подтвердите платёж.</p>
         <button id="subscriptionBtn" class="btn ghost">💳 Оплатить выбранный тариф</button>
       </section>
 
@@ -222,6 +220,22 @@
         <div class="instruction-actions-two">
           <button type="button" id="instructionBackBtn" class="btn ghost">Назад</button>
           <button type="button" id="instructionDoneBtn" class="btn primary">Готово</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="payment-modal hidden" id="paymentModal" aria-hidden="true">
+      <div class="payment-modal-card">
+        <div class="payment-modal-head">
+          <h3>Выбор оплаты</h3>
+          <button type="button" class="btn tiny" id="paymentModalCloseBtn">✕</button>
+        </div>
+        <p class="instruction-note" id="paymentModalTariffText">Тариф: Базовый</p>
+        <div class="payment-methods" id="paymentModalMethods"></div>
+        <p class="tiny-note" id="paymentModalStatus">Выберите способ оплаты.</p>
+        <div class="instruction-actions-two">
+          <button type="button" id="paymentModalCancelBtn" class="btn ghost">Отмена</button>
+          <button type="button" id="paymentModalPayBtn" class="btn primary">Оплатить</button>
         </div>
       </div>
     </section>

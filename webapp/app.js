@@ -27,9 +27,14 @@ const copyRefBtn = document.getElementById("copyRefBtn");
 const timeLeftValue = document.getElementById("timeLeftValue");
 const tariffList = document.getElementById("tariffList");
 const selectedTariffHint = document.getElementById("selectedTariffHint");
-const paymentMethods = document.getElementById("paymentMethods");
-const paymentStatusHint = document.getElementById("paymentStatusHint");
 const subscriptionBtn = document.getElementById("subscriptionBtn");
+const paymentModal = document.getElementById("paymentModal");
+const paymentModalMethods = document.getElementById("paymentModalMethods");
+const paymentModalStatus = document.getElementById("paymentModalStatus");
+const paymentModalTariffText = document.getElementById("paymentModalTariffText");
+const paymentModalCloseBtn = document.getElementById("paymentModalCloseBtn");
+const paymentModalCancelBtn = document.getElementById("paymentModalCancelBtn");
+const paymentModalPayBtn = document.getElementById("paymentModalPayBtn");
 const changeServerBtn = document.getElementById("changeServerBtn");
 const autoServerBtn = document.getElementById("autoServerBtn");
 const serverValue = document.getElementById("serverValue");
@@ -759,12 +764,12 @@ function selectedPaymentMethod() {
 }
 
 
-function renderPaymentMethods() {
-  if (!paymentMethods) {
+function renderPaymentMethodsForModal() {
+  if (!paymentModalMethods) {
     return;
   }
 
-  paymentMethods.innerHTML = "";
+  paymentModalMethods.innerHTML = "";
   PAYMENT_METHODS.forEach((method) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -780,19 +785,42 @@ function renderPaymentMethods() {
 
     button.addEventListener("click", () => {
       state.paymentMethod = method.code;
-      renderPaymentMethods();
-      renderTariffList();
-      if (paymentStatusHint) {
-        paymentStatusHint.textContent = `Способ оплаты: ${method.title}`;
+      renderPaymentMethodsForModal();
+      if (paymentModalStatus) {
+        paymentModalStatus.textContent = `Способ оплаты: ${method.title}`;
       }
     });
 
-    paymentMethods.appendChild(button);
+    paymentModalMethods.appendChild(button);
   });
 
-  if (paymentStatusHint) {
-    paymentStatusHint.textContent = `Способ оплаты: ${selectedPaymentMethod().title}`;
+  if (paymentModalStatus) {
+    paymentModalStatus.textContent = `Способ оплаты: ${selectedPaymentMethod().title}`;
   }
+}
+
+
+function openPaymentModal() {
+  if (!paymentModal) {
+    return;
+  }
+
+  const selected = currentTariff();
+  if (paymentModalTariffText) {
+    paymentModalTariffText.textContent = `Тариф: ${selected.name} • ${selected.priceRub} ₽ • ${selected.duration}`;
+  }
+  renderPaymentMethodsForModal();
+  paymentModal.classList.remove("hidden");
+  paymentModal.setAttribute("aria-hidden", "false");
+}
+
+
+function closePaymentModal() {
+  if (!paymentModal) {
+    return;
+  }
+  paymentModal.classList.add("hidden");
+  paymentModal.setAttribute("aria-hidden", "true");
 }
 
 
@@ -1240,9 +1268,8 @@ function renderTariffList() {
   });
 
   const selected = currentTariff();
-  const method = selectedPaymentMethod();
-  selectedTariffHint.textContent = `Выбран тариф: ${selected.name} (${selected.priceRub} ₽) • ${method.title}`;
-  subscriptionBtn.textContent = `💳 Оплатить: ${method.title}`;
+  selectedTariffHint.textContent = `Выбран тариф: ${selected.name} (${selected.priceRub} ₽)`;
+  subscriptionBtn.textContent = "💳 Оплатить выбранный тариф";
 }
 
 async function getPublicIpInfo() {
@@ -1410,13 +1437,18 @@ freeAccessValue.addEventListener("click", async () => {
   }
 });
 
-subscriptionBtn.addEventListener("click", async () => {
+async function startPaymentForSelectedMethod() {
   const selected = currentTariff();
   const method = selectedPaymentMethod();
 
-  subscriptionBtn.disabled = true;
-  if (paymentStatusHint) {
-    paymentStatusHint.textContent = "Создаём платёж...";
+  if (subscriptionBtn) {
+    subscriptionBtn.disabled = true;
+  }
+  if (paymentModalPayBtn) {
+    paymentModalPayBtn.disabled = true;
+  }
+  if (paymentModalStatus) {
+    paymentModalStatus.textContent = "Создаём платёж...";
   }
 
   try {
@@ -1433,6 +1465,7 @@ subscriptionBtn.addEventListener("click", async () => {
           if (status === "paid") {
             showToast("Оплата прошла успешно, обновляем подписку...");
             await loadUserState();
+            closePaymentModal();
             return;
           }
           if (status === "cancelled") {
@@ -1447,8 +1480,8 @@ subscriptionBtn.addEventListener("click", async () => {
         openExternalLink(invoiceUrl);
       }
 
-      if (paymentStatusHint) {
-        paymentStatusHint.textContent = "Откройте счёт Telegram Stars и завершите оплату.";
+      if (paymentModalStatus) {
+        paymentModalStatus.textContent = "Откройте счёт Telegram Stars и завершите оплату.";
       }
       return;
     }
@@ -1459,18 +1492,53 @@ subscriptionBtn.addEventListener("click", async () => {
     }
 
     openExternalLink(paymentUrl);
-    if (paymentStatusHint) {
-      paymentStatusHint.textContent = `Открыта страница оплаты: ${method.title}`;
+    if (paymentModalStatus) {
+      paymentModalStatus.textContent = `Открыта страница оплаты: ${method.title}`;
     }
     showToast(`Переход к оплате: ${method.title}`);
+    closePaymentModal();
   } catch (error) {
     const message = error?.message || "Не удалось запустить оплату";
-    if (paymentStatusHint) {
-      paymentStatusHint.textContent = message;
+    if (paymentModalStatus) {
+      paymentModalStatus.textContent = message;
     }
     showToast(message);
   } finally {
-    subscriptionBtn.disabled = false;
+    if (subscriptionBtn) {
+      subscriptionBtn.disabled = false;
+    }
+    if (paymentModalPayBtn) {
+      paymentModalPayBtn.disabled = false;
+    }
+  }
+}
+
+
+subscriptionBtn.addEventListener("click", () => {
+  openPaymentModal();
+});
+
+paymentModalPayBtn?.addEventListener("click", () => {
+  void startPaymentForSelectedMethod();
+});
+
+paymentModalCloseBtn?.addEventListener("click", () => {
+  closePaymentModal();
+});
+
+paymentModalCancelBtn?.addEventListener("click", () => {
+  closePaymentModal();
+});
+
+paymentModal?.addEventListener("click", (event) => {
+  if (event.target === paymentModal) {
+    closePaymentModal();
+  }
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && paymentModal && !paymentModal.classList.contains("hidden")) {
+    closePaymentModal();
   }
 });
 
@@ -1613,7 +1681,6 @@ updateServerView();
 renderServerList();
 syncSubscription();
 syncFreeAccessPanel();
-renderPaymentMethods();
 renderTariffList();
 renderByMode();
 showOnboardingIfNeeded();

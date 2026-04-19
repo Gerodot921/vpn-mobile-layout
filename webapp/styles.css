@@ -546,6 +546,41 @@ body {
   color: #9fc6ee;
 }
 
+.payment-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(4, 12, 22, 0.76);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.payment-modal.hidden {
+  display: none;
+}
+
+.payment-modal-card {
+  width: min(520px, 100%);
+  background: linear-gradient(180deg, #0d1e33, #081423);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  animation: fadeUp 0.24s ease;
+}
+
+.payment-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.payment-modal-head h3 {
+  margin: 0;
+}
+
 .hidden {
   display: none;
 }
