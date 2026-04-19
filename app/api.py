@@ -14,7 +14,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 from aiogram import Bot
 from aiogram.types import BufferedInputFile, LabeledPrice
 
-from app.ads import complete_ad_session, start_ad_session
+from app.ads import complete_ad_session, register_ad_click, start_ad_session
 from app.crypto_payments import (
     create_crypto_order,
     get_order_by_id,
@@ -482,8 +482,11 @@ async def claim_free_access(request: web.Request) -> web.Response:
         # Ensure peer is added to server only once per free access slot
         peer_added = record.get("peer_added_to_server", False) if record else False
         if not peer_added and record:
-            add_peer_to_server(user_id)
-            mark_free_access_peer_added(user_id)
+            peer_add_ok = add_peer_to_server(user_id)
+            if peer_add_ok:
+                mark_free_access_peer_added(user_id)
+            else:
+                logging.warning("Peer attach was skipped/failed for user_id=%s", user_id)
 
         response_payload = _build_state_payload(user_data)
         await _enrich_referral_invites_with_usernames(response_payload, request.app.get("bot"))
@@ -590,6 +593,27 @@ async def ad_complete(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
     except Exception:
         logging.exception("/api/ad/complete unexpected error")
+        return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
+
+
+async def ad_click(request: web.Request) -> web.Response:
+    try:
+        payload = await _read_request_json(request)
+        init_data = _init_data_from_payload(payload)
+        user_data = _extract_user(init_data)
+        user_id = int(user_data["id"])
+
+        session_token = str(payload.get("sessionToken", "")).strip()
+        ok, reason = register_ad_click(user_id, session_token)
+        if not ok:
+            return web.json_response({"ok": False, "error": reason}, status=400)
+
+        return web.json_response({"ok": True, "status": reason})
+    except web.HTTPException as exc:
+        logging.warning("/api/ad/click failed: %s", exc.text)
+        return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
+    except Exception:
+        logging.exception("/api/ad/click unexpected error")
         return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
 
 
@@ -852,6 +876,7 @@ def create_api_app(bot: Bot) -> web.Application:
     app.router.add_post("/api/claim-free-access", claim_free_access)
     app.router.add_post("/api/ad/start", ad_start)
     app.router.add_post("/api/ad/complete", ad_complete)
+    app.router.add_post("/api/ad/click", ad_click)
     app.router.add_post("/api/payment/create", payment_create)
     app.router.add_post("/api/payment/cryptocloud/webhook", payment_cryptocloud_webhook)
     app.router.add_get("/healthz", lambda _request: web.json_response({"ok": True}))

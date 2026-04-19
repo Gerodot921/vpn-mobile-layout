@@ -227,6 +227,7 @@ const state = {
     invites: [],
   },
   adSessionToken: null,
+  adSessionStartedAtMs: 0,
   adWatchSeconds: REWARD_WATCH_SECONDS,
   adAssetUrl: "",
   adClickUrl: "",
@@ -987,6 +988,7 @@ function showAdOverlay(ad, watchSeconds) {
     if (!clickUrl) {
       return;
     }
+    void trackAdClick();
     openExternalLink(clickUrl);
   };
   adMedia.onclick = onAdClick;
@@ -1043,6 +1045,11 @@ async function completeAdSession() {
     throw new Error("Сессия рекламы не найдена");
   }
 
+  const elapsedSeconds = state.adSessionStartedAtMs > 0
+    ? Math.max(0, Math.floor((Date.now() - state.adSessionStartedAtMs) / 1000))
+    : 0;
+  const watchedSeconds = Math.max(Number(state.adWatchSeconds || 0), elapsedSeconds);
+
   const response = await fetch("/api/ad/complete", {
     method: "POST",
     headers: {
@@ -1051,13 +1058,35 @@ async function completeAdSession() {
     body: JSON.stringify({
       initData: tg.initData,
       sessionToken: state.adSessionToken,
-      watchedSeconds: state.adWatchSeconds,
+      watchedSeconds,
     }),
   });
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data?.ok) {
     throw new Error(data?.error || "Просмотр рекламы не подтвержден");
+  }
+}
+
+
+async function trackAdClick() {
+  if (!tg?.initData || !state.adSessionToken) {
+    return;
+  }
+
+  try {
+    await fetch("/api/ad/click", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        initData: tg.initData,
+        sessionToken: state.adSessionToken,
+      }),
+    });
+  } catch (_error) {
+    // Ignore tracking errors, advertiser redirect should still work.
   }
 }
 
@@ -1101,6 +1130,7 @@ async function startFreeServerAdFlow(server) {
     const watchSeconds = Number(ad.duration_sec || REWARD_WATCH_SECONDS);
 
     state.adSessionToken = data?.session_token || null;
+    state.adSessionStartedAtMs = Date.now();
     state.adWatchSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0
       ? watchSeconds
       : REWARD_WATCH_SECONDS;
@@ -1122,6 +1152,7 @@ async function startFreeServerAdFlow(server) {
 
         const accessData = await requestFreeAccess();
         state.adSessionToken = null;
+        state.adSessionStartedAtMs = 0;
         state.adWatchSeconds = REWARD_WATCH_SECONDS;
         state.adAssetUrl = "";
         state.adClickUrl = "";
@@ -1140,9 +1171,10 @@ async function startFreeServerAdFlow(server) {
         freeServerAdInProgress = false;
         syncFreeAccessPanel();
       }
-    }, state.adWatchSeconds * 1000);
+    }, (state.adWatchSeconds + 1) * 1000);
   } catch (error) {
     freeServerAdInProgress = false;
+    state.adSessionStartedAtMs = 0;
     state.rewardReadyAt = 0;
     saveRewardTimerState();
     hideAdOverlay();
