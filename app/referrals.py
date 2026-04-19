@@ -243,17 +243,13 @@ def get_user_id_by_username(username: str) -> int | None:
     with _state_lock:
         with _connect() as connection:
             _ensure_seeded(connection)
-            rows = connection.execute(
-                f"SELECT user_id, username FROM {REFERRALS_TABLE} WHERE username <> ''"
-            ).fetchall()
+            row = connection.execute(
+                f"SELECT user_id FROM {REFERRALS_TABLE} WHERE lower(username) = ? OR lower(username) = ? LIMIT 1",
+                (normalized, f"@{normalized}"),
+            ).fetchone()
 
-    for row in rows:
-        user_id = row[0]
-        saved_username = row[1]
-        if not isinstance(saved_username, str) or not saved_username:
-            continue
-        if saved_username.strip().lstrip("@").lower() == normalized:
-            return int(user_id)
+    if row is not None:
+        return int(row[0])
     return None
 
 
