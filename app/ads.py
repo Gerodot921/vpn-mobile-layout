@@ -138,12 +138,19 @@ def _deserialize_ad(raw: Any) -> Ad | None:
     if not isinstance(payload, dict):
         return None
 
+    duration_raw = payload.get("duration_sec", _default_ad()["duration_sec"])
+    try:
+        duration_sec = int(duration_raw)
+    except Exception:
+        duration_sec = _default_ad()["duration_sec"]
+    duration_sec = min(max(duration_sec, 5), 300)
+
     return {
         "ad_id": str(payload.get("ad_id", "ad-default")),
         "title": str(payload.get("title", "Рекламное предложение")),
         "asset_url": str(payload.get("asset_url", _default_ad()["asset_url"])),
         "click_url": str(payload.get("click_url", _default_ad()["click_url"])),
-        "duration_sec": int(payload.get("duration_sec", _default_ad()["duration_sec"])),
+        "duration_sec": duration_sec,
         "active": bool(payload.get("active", True)),
     }
 
@@ -262,9 +269,18 @@ def _load_ad_state() -> AdState:
         parsed_ad = _deserialize_ad(row[0])
         if parsed_ad is not None:
             active_ad = parsed_ad
-        impressions = int(row[1]) if isinstance(row[1], int) and row[1] >= 0 else 0
-        completions = int(row[2]) if isinstance(row[2], int) and row[2] >= 0 else 0
-        clicks = int(row[3]) if isinstance(row[3], int) and row[3] >= 0 else 0
+        try:
+            impressions = max(int(row[1]), 0)
+        except Exception:
+            impressions = 0
+        try:
+            completions = max(int(row[2]), 0)
+        except Exception:
+            completions = 0
+        try:
+            clicks = max(int(row[3]), 0)
+        except Exception:
+            clicks = 0
 
     if active_ad["duration_sec"] <= 0:
         active_ad["duration_sec"] = DEFAULT_AD_DURATION_SECONDS
@@ -295,15 +311,28 @@ def _load_sessions() -> dict[str, AdSession]:
         ).fetchall()
 
     for row in rows:
-        token = str(row[0])
+        try:
+            token = str(row[0])
+            user_id = int(row[1])
+            ad_id = str(row[2])
+            started_at = str(row[3])
+            expires_at = str(row[4])
+            required_seconds = int(row[5])
+            required_seconds = min(max(required_seconds, 5), 300)
+            completed = bool(row[6])
+            clicked = bool(row[7])
+        except Exception:
+            # Skip malformed legacy rows instead of crashing ad endpoints.
+            continue
+
         sessions[token] = {
-            "user_id": int(row[1]),
-            "ad_id": str(row[2]),
-            "started_at": str(row[3]),
-            "expires_at": str(row[4]),
-            "required_seconds": int(row[5]) if isinstance(row[5], int) else DEFAULT_AD_DURATION_SECONDS,
-            "completed": bool(row[6]),
-            "clicked": bool(row[7]),
+            "user_id": user_id,
+            "ad_id": ad_id,
+            "started_at": started_at,
+            "expires_at": expires_at,
+            "required_seconds": required_seconds,
+            "completed": completed,
+            "clicked": clicked,
         }
 
     return sessions

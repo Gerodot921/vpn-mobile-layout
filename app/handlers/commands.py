@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import shlex
 from datetime import datetime, timezone
 
 from aiogram import F, Router
@@ -655,7 +656,11 @@ async def sms_all_command(message: Message, command: CommandObject | None = None
 
 @router.message(Command(commands=["adset"]), F.func(_is_owner))
 async def ad_set_command(message: Message, command: CommandObject | None = None) -> None:
-    args = (command.args or "").split() if command else []
+    raw_args = (command.args or "") if command else ""
+    try:
+        args = shlex.split(raw_args)
+    except Exception:
+        args = raw_args.split()
     if len(args) < 1:
         await message.answer(
             "Формат: /adset <asset_url> [seconds] [click_url]\n"
@@ -682,8 +687,12 @@ async def ad_set_command(message: Message, command: CommandObject | None = None)
             click_url=click_url,
             duration_sec=duration_sec,
         )
-    except Exception:
-        await message.answer("Не удалось обновить рекламу. Проверьте аргументы команды.")
+    except Exception as exc:
+        logging.exception("/adset failed with args=%s", raw_args)
+        await message.answer(
+            "Не удалось обновить рекламу. Проверьте аргументы команды.\n"
+            f"Причина: {type(exc).__name__}: {exc}"
+        )
         return
 
     await message.answer(
