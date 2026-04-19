@@ -133,9 +133,9 @@ const INSTRUCTION_APP_ICON_DATA = {
 };
 
 const IOS_AMNEZIA_VPN_GUIDE_IMAGES = {
-  step2: "/assets/ios-step2.svg",
-  step3: "/assets/ios-step3.svg",
-  step4: "/assets/ios-step4.svg",
+  step2: "https://cdn.jsdelivr.net/gh/Gerodot921/vpn-mobile-layout@master/webapp/assets/ios-step2.png",
+  step3: "https://cdn.jsdelivr.net/gh/Gerodot921/vpn-mobile-layout@master/webapp/assets/ios-step3.png",
+  step4: "https://cdn.jsdelivr.net/gh/Gerodot921/vpn-mobile-layout@master/webapp/assets/ios-step4.png",
 };
 
 const serverConfigs = [
