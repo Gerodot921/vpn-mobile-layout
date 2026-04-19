@@ -265,20 +265,34 @@ def mark_order_paid(order_id: str, payload: dict[str, Any] | None = None) -> tup
             return record, True
 
 
-def list_recent_orders(limit: int = 20) -> list[CryptoOrderRecord]:
+def list_recent_orders(limit: int = 20, status: str | None = None) -> list[CryptoOrderRecord]:
     safe_limit = min(max(int(limit), 1), 100)
+    status_filter = status.strip().lower() if isinstance(status, str) and status.strip() else None
     with _state_lock:
         _ensure_seeded()
         with _connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT order_id, provider, user_id, plan_code, plan_name, days, amount_rub, status,
-                       provider_invoice_id, invoice_url, created_at, paid_at, last_payload_json
-                FROM {CRYPTO_ORDERS_TABLE}
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (safe_limit,),
-            ).fetchall()
+            if status_filter:
+                rows = connection.execute(
+                    f"""
+                    SELECT order_id, provider, user_id, plan_code, plan_name, days, amount_rub, status,
+                           provider_invoice_id, invoice_url, created_at, paid_at, last_payload_json
+                    FROM {CRYPTO_ORDERS_TABLE}
+                    WHERE lower(status) = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (status_filter, safe_limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    f"""
+                    SELECT order_id, provider, user_id, plan_code, plan_name, days, amount_rub, status,
+                           provider_invoice_id, invoice_url, created_at, paid_at, last_payload_json
+                    FROM {CRYPTO_ORDERS_TABLE}
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (safe_limit,),
+                ).fetchall()
 
     return [_row_to_record(row) for row in rows]

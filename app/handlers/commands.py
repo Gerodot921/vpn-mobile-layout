@@ -9,7 +9,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from app.ads import get_ad_stats, set_active_ad, set_ad_active
-from app.crypto_payments import list_recent_orders
+from app.crypto_payments import get_order_by_id, list_recent_orders
 from app.json_storage import get_storage_diagnostics
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
@@ -204,7 +204,8 @@ def _build_admin_help_lines() -> list[str]:
         "/adon — включить рекламу",
         "/adoff — выключить рекламу",
         "/adstats — статистика рекламы",
-        "/paystat [n] — последние платежи (по умолчанию 20)",
+        "/paystat [n] [status] — последние платежи, статус: paid|pending",
+        "/payorder <order_id> — подробности конкретного платежа",
         "/diag — диагностика БД и хранилищ",
         "/profile_reset — сбросить личный VPN-профиль",
         "/clear_chat — очистить чат",
@@ -761,14 +762,23 @@ async def diagnostics_command(message: Message) -> None:
 
 @router.message(Command(commands=["paystat", "paystats"]), F.func(_is_owner))
 async def payment_stats_command(message: Message, command: CommandObject | None = None) -> None:
-    raw_limit = (command.args or "").strip() if command else ""
-    try:
-        limit = int(raw_limit) if raw_limit else 20
-    except Exception:
-        await message.answer("Формат: /paystat [кол-во]\nПример: /paystat 30")
+    args = (command.args or "").split() if command and command.args else []
+    limit = 20
+    status_filter: str | None = None
+
+    if args:
+        if args[0].isdigit():
+            limit = int(args[0])
+            if len(args) >= 2:
+                status_filter = args[1].strip().lower()
+        else:
+            status_filter = args[0].strip().lower()
+
+    if status_filter not in {None, "paid", "pending"}:
+        await message.answer("Формат: /paystat [кол-во] [paid|pending]\nПример: /paystat 30 paid")
         return
 
-    orders = list_recent_orders(limit)
+    orders = list_recent_orders(limit, status=status_filter)
     if not orders:
         await message.answer("Платежей пока нет")
         return
@@ -792,4 +802,34 @@ async def payment_stats_command(message: Message, command: CommandObject | None 
         lines.append(f"created={created_at} | paid={paid_at} | invoice={invoice_id}")
         lines.append("")
 
+    await _send_lines_report(message, lines)
+
+
+@router.message(Command(commands=["payorder"]), F.func(_is_owner))
+async def payment_order_command(message: Message, command: CommandObject | None = None) -> None:
+    order_id = (command.args or "").strip() if command else ""
+    if not order_id:
+        await message.answer("Формат: /payorder <order_id>")
+        return
+
+    record = get_order_by_id(order_id)
+    if record is None:
+        await message.answer("Платеж не найден")
+        return
+
+    lines = [
+        "🧾 Платеж",
+        "",
+        f"order_id: {record.get('order_id', '-')}",
+        f"status: {record.get('status', '-')}",
+        f"provider: {record.get('provider', '-')}",
+        f"user_id: {record.get('user_id', '-')}",
+        f"plan: {record.get('plan_name', '-')} ({record.get('plan_code', '-')})",
+        f"amount_rub: {float(record.get('amount_rub') or 0):.2f}",
+        f"days: {record.get('days', '-')}",
+        f"provider_invoice_id: {record.get('provider_invoice_id', '-')}",
+        f"invoice_url: {record.get('invoice_url', '-')}",
+        f"created_at: {_fmt_dt(str(record.get('created_at') or '-'))}",
+        f"paid_at: {_fmt_dt(str(record.get('paid_at') or '-')) if record.get('paid_at') else '-'}",
+    ]
     await _send_lines_report(message, lines)
