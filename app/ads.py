@@ -21,6 +21,7 @@ DEFAULT_AD_DURATION_SECONDS = 30
 DEFAULT_SESSION_TTL_SECONDS = 600
 
 _state_lock = Lock()
+_seed_checked = False
 
 
 class Ad(TypedDict):
@@ -122,9 +123,14 @@ def _deserialize_ad(raw: Any) -> Ad | None:
 
 
 def _ensure_seeded() -> None:
+    global _seed_checked
+    if _seed_checked:
+        return
+
     with _connect() as connection:
         existing = connection.execute(f"SELECT COUNT(*) FROM {ADS_STATE_TABLE}").fetchone()
         if existing and int(existing[0]) > 0:
+            _seed_checked = True
             return
 
         raw_data = load_json_file(ADS_STORAGE_PATH, {})
@@ -170,6 +176,7 @@ def _ensure_seeded() -> None:
                 )
 
         connection.commit()
+    _seed_checked = True
 
 
 def _default_ad() -> Ad:

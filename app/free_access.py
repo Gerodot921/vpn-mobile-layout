@@ -23,6 +23,7 @@ FREE_ACCESS_CLEANUP_INTERVAL_SECONDS = 60
 FREE_ACCESS_REMINDER_THRESHOLDS = (10, 5, 1)
 
 _state_lock = Lock()
+_seed_checked = False
 
 
 class FreeAccessRecord(TypedDict):
@@ -145,9 +146,14 @@ def _row_to_stats(row: tuple[Any, ...] | None) -> dict[str, object]:
 
 
 def _ensure_seeded() -> None:
+    global _seed_checked
+    if _seed_checked:
+        return
+
     with _connect() as connection:
         existing = connection.execute(f"SELECT COUNT(*) FROM {FREE_ACCESS_TABLE}").fetchone()
         if existing and int(existing[0]) > 0:
+            _seed_checked = True
             return
 
         raw_data = load_json_file(FREE_ACCESS_STORAGE_PATH, {})
@@ -204,6 +210,7 @@ def _ensure_seeded() -> None:
             )
 
         connection.commit()
+    _seed_checked = True
 
 
 def _load_state() -> FreeAccessState:

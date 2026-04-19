@@ -13,6 +13,7 @@ REFERRALS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "referra
 REFERRALS_TABLE = "referrals"
 
 _state_lock = Lock()
+_seed_checked = False
 
 
 class UserReferralData(TypedDict):
@@ -133,8 +134,13 @@ def _upsert_user(connection: sqlite3.Connection, user_id: int, data: UserReferra
 
 
 def _ensure_seeded(connection: sqlite3.Connection) -> None:
+    global _seed_checked
+    if _seed_checked:
+        return
+
     existing = connection.execute(f"SELECT COUNT(*) FROM {REFERRALS_TABLE}").fetchone()
     if existing and int(existing[0]) > 0:
+        _seed_checked = True
         return
 
     raw_data = load_json_file(REFERRALS_STORAGE_PATH, {})
@@ -162,6 +168,7 @@ def _ensure_seeded(connection: sqlite3.Connection) -> None:
         _upsert_user(connection, user_id, data)
 
     connection.commit()
+    _seed_checked = True
 
 
 def _load_state() -> ReferralState:

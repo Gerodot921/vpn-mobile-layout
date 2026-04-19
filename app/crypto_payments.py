@@ -13,6 +13,7 @@ CRYPTO_ORDERS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "cry
 CRYPTO_ORDERS_TABLE = "crypto_orders"
 
 _state_lock = Lock()
+_seed_checked = False
 
 
 class CryptoOrderRecord(TypedDict):
@@ -97,9 +98,14 @@ def _row_to_record(row: sqlite3.Row | tuple[Any, ...]) -> CryptoOrderRecord:
 
 
 def _ensure_seeded() -> None:
+    global _seed_checked
+    if _seed_checked:
+        return
+
     with _connect() as connection:
         existing = connection.execute(f"SELECT COUNT(*) FROM {CRYPTO_ORDERS_TABLE}").fetchone()
         if existing and int(existing[0]) > 0:
+            _seed_checked = True
             return
 
         raw = load_json_file(CRYPTO_ORDERS_STORAGE_PATH, {})
@@ -144,6 +150,7 @@ def _ensure_seeded() -> None:
             )
 
         connection.commit()
+    _seed_checked = True
 
 
 def _load_state() -> CryptoOrdersState:

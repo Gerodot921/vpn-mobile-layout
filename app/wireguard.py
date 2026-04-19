@@ -30,6 +30,7 @@ DEFAULT_CLIENT_START_OCTET = 2
 DEFAULT_MTU = 1280
 
 _state_lock = Lock()
+_seed_checked = False
 
 
 class WireGuardProfile(TypedDict):
@@ -122,6 +123,16 @@ def _profile_row_to_record(row: tuple[Any, ...]) -> WireGuardProfile:
     }
 
 
+def _fetch_profile(connection: sqlite3.Connection, user_id: int) -> WireGuardProfile | None:
+    row = connection.execute(
+        f"SELECT user_id, profile_id, private_key, public_key, preshared_key, address, endpoint, dns, allowed_ips, mtu, configured, created_at, updated_at, config_text, config_filename FROM {WIREGUARD_PROFILES_TABLE} WHERE user_id = ?",
+        (str(user_id),),
+    ).fetchone()
+    if row is None:
+        return None
+    return _profile_row_to_record(row)
+
+
 def _state_to_json(state: WireGuardState) -> str:
     return json.dumps(state, ensure_ascii=False, sort_keys=True)
 
@@ -194,10 +205,15 @@ def _state_from_json(raw_data: Any) -> WireGuardState:
 
 
 def _ensure_seeded() -> None:
+    global _seed_checked
+    if _seed_checked:
+        return
+
     with _connect() as connection:
         state_exists = connection.execute(f"SELECT COUNT(*) FROM {WIREGUARD_STATE_TABLE}").fetchone()
         profiles_exist = connection.execute(f"SELECT COUNT(*) FROM {WIREGUARD_PROFILES_TABLE}").fetchone()
         if state_exists and int(state_exists[0]) > 0 and profiles_exist and int(profiles_exist[0]) > 0:
+            _seed_checked = True
             return
 
         raw_data = load_json_file(WIREGUARD_STORAGE_PATH, _state_default())
@@ -237,6 +253,7 @@ def _ensure_seeded() -> None:
             )
 
         connection.commit()
+    _seed_checked = True
 
 
 def _state_default() -> WireGuardState:
@@ -573,8 +590,9 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
 
 def get_wireguard_profile(user_id: int) -> WireGuardProfile | None:
     with _state_lock:
-        state = _load_state()
-        return state["profiles"].get(_user_key(user_id))
+        _ensure_seeded()
+        with _connect() as connection:
+            return _fetch_profile(connection, user_id)
 
 
 def get_wireguard_config_text(user_id: int) -> str | None:

@@ -24,6 +24,7 @@ REMINDER_WINDOWS: tuple[tuple[int, timedelta, timedelta], ...] = (
 )
 
 _state_lock = Lock()
+_seed_checked = False
 
 
 class SubscriptionRecord(TypedDict):
@@ -89,10 +90,48 @@ def _row_to_record(row: tuple[Any, ...]) -> tuple[str, SubscriptionRecord]:
     }
 
 
+def _fetch_record(connection: sqlite3.Connection, user_id: int) -> SubscriptionRecord | None:
+    row = connection.execute(
+        f"SELECT user_id, expires_at, reminders_sent_json, plan_name FROM {SUBSCRIPTIONS_TABLE} WHERE user_id = ?",
+        (str(user_id),),
+    ).fetchone()
+    if row is None:
+        return None
+    _, record = _row_to_record(row)
+    return record
+
+
+def _upsert_record(connection: sqlite3.Connection, user_id: int, record: SubscriptionRecord) -> SubscriptionRecord:
+    normalized: SubscriptionRecord = {
+        "expires_at": str(record.get("expires_at") or _now_utc().isoformat()),
+        "reminders_sent": [int(item) for item in record.get("reminders_sent", []) if isinstance(item, int)],
+        "plan_name": str(record.get("plan_name") or "Базовый"),
+    }
+    connection.execute(
+        f"""
+        INSERT OR REPLACE INTO {SUBSCRIPTIONS_TABLE}
+        (user_id, expires_at, reminders_sent_json, plan_name)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            str(user_id),
+            normalized["expires_at"],
+            _encode_reminders(normalized["reminders_sent"]),
+            normalized["plan_name"],
+        ),
+    )
+    return normalized
+
+
 def _ensure_seeded() -> None:
+    global _seed_checked
+    if _seed_checked:
+        return
+
     with _connect() as connection:
         existing = connection.execute(f"SELECT COUNT(*) FROM {SUBSCRIPTIONS_TABLE}").fetchone()
         if existing and int(existing[0]) > 0:
+            _seed_checked = True
             return
 
         raw_data = load_json_file(SUBSCRIPTION_STORAGE_PATH, {})
@@ -124,6 +163,7 @@ def _ensure_seeded() -> None:
             )
 
         connection.commit()
+    _seed_checked = True
 
 
 def _load_state() -> SubscriptionState:
@@ -203,85 +243,98 @@ def _plural_ru(value: int, one: str, few: str, many: str) -> str:
 
 
 def ensure_subscription(user_id: int, initial_days: int = DEFAULT_SUBSCRIPTION_DAYS) -> SubscriptionRecord:
-    user_key = str(user_id)
     with _state_lock:
-        state = _load_state()
-        if user_key not in state:
-            state[user_key] = {
+        _ensure_seeded()
+        with _connect() as connection:
+            existing = _fetch_record(connection, user_id)
+            if existing is not None:
+                return existing
+
+            created = _upsert_record(
+                connection,
+                user_id,
+                {
                 "expires_at": (_now_utc() + timedelta(days=initial_days)).isoformat(),
                 "reminders_sent": [],
                 "plan_name": "Базовый",
-            }
-            _save_state(state)
-        return state[user_key]
+                },
+            )
+            connection.commit()
+            return created
 
 
 def extend_subscription(user_id: int, days: int, plan_name: str | None = None) -> SubscriptionRecord:
-    user_key = str(user_id)
     requested_plan_name = plan_name
     with _state_lock:
-        state = _load_state()
-        current = state.get(user_key)
-        now = _now_utc()
-        if current is None:
-            base_expires_at = now
-            reminders_sent: list[int] = []
-            current_plan_name = "Базовый"
-        else:
-            base_expires_at = _parse_expires_at(current["expires_at"])
-            reminders_sent = current.get("reminders_sent", [])
-            current_plan_name = current.get("plan_name", "Базовый")
+        _ensure_seeded()
+        with _connect() as connection:
+            current = _fetch_record(connection, user_id)
+            now = _now_utc()
+            if current is None:
+                base_expires_at = now
+                reminders_sent: list[int] = []
+                current_plan_name = "Базовый"
+            else:
+                base_expires_at = _parse_expires_at(current["expires_at"])
+                reminders_sent = current.get("reminders_sent", [])
+                current_plan_name = current.get("plan_name", "Базовый")
 
-        resolved_plan_name = (
-            current_plan_name if isinstance(current_plan_name, str) and current_plan_name else "Базовый"
-        )
-        if isinstance(requested_plan_name, str) and requested_plan_name.strip():
-            resolved_plan_name = requested_plan_name.strip()
+            resolved_plan_name = (
+                current_plan_name if isinstance(current_plan_name, str) and current_plan_name else "Базовый"
+            )
+            if isinstance(requested_plan_name, str) and requested_plan_name.strip():
+                resolved_plan_name = requested_plan_name.strip()
 
-        if base_expires_at < now:
-            base_expires_at = now
+            if base_expires_at < now:
+                base_expires_at = now
 
-        state[user_key] = {
-            "expires_at": (base_expires_at + timedelta(days=days)).isoformat(),
-            "reminders_sent": reminders_sent,
-            "plan_name": resolved_plan_name,
-        }
-        _save_state(state)
-        return state[user_key]
+            updated = _upsert_record(
+                connection,
+                user_id,
+                {
+                    "expires_at": (base_expires_at + timedelta(days=days)).isoformat(),
+                    "reminders_sent": reminders_sent,
+                    "plan_name": resolved_plan_name,
+                },
+            )
+            connection.commit()
+            return updated
 
 
 def set_subscription_plan_name(user_id: int, plan_name: str) -> SubscriptionRecord | None:
     if not isinstance(plan_name, str) or not plan_name.strip():
         return None
 
-    user_key = str(user_id)
     with _state_lock:
-        state = _load_state()
-        record = state.get(user_key)
-        if record is None:
-            return None
+        _ensure_seeded()
+        with _connect() as connection:
+            record = _fetch_record(connection, user_id)
+            if record is None:
+                return None
 
-        record["plan_name"] = plan_name.strip()
-        state[user_key] = record
-        _save_state(state)
-        return record
+            record["plan_name"] = plan_name.strip()
+            updated = _upsert_record(connection, user_id, record)
+            connection.commit()
+            return updated
 
 
 def delete_subscription(user_id: int) -> SubscriptionRecord | None:
-    user_key = str(user_id)
     with _state_lock:
-        state = _load_state()
-        record = state.pop(user_key, None)
-        if record is None:
-            return None
-        _save_state(state)
-        return record
+        _ensure_seeded()
+        with _connect() as connection:
+            record = _fetch_record(connection, user_id)
+            if record is None:
+                return None
+            connection.execute(f"DELETE FROM {SUBSCRIPTIONS_TABLE} WHERE user_id = ?", (str(user_id),))
+            connection.commit()
+            return record
 
 
 def get_remaining_time(user_id: int) -> timedelta | None:
-    user_key = str(user_id)
-    state = _load_state()
-    record = state.get(user_key)
+    with _state_lock:
+        _ensure_seeded()
+        with _connect() as connection:
+            record = _fetch_record(connection, user_id)
     if record is None:
         return None
     return _parse_expires_at(record["expires_at"]) - _now_utc()
@@ -295,8 +348,10 @@ def get_remaining_text(user_id: int) -> str:
 
 
 def get_subscription_plan_name(user_id: int) -> str:
-    state = _load_state()
-    record = state.get(str(user_id))
+    with _state_lock:
+        _ensure_seeded()
+        with _connect() as connection:
+            record = _fetch_record(connection, user_id)
     if record is None:
         return "Базовый"
     plan_name = record.get("plan_name", "Базовый")
@@ -304,11 +359,10 @@ def get_subscription_plan_name(user_id: int) -> str:
 
 
 def get_subscription_record(user_id: int) -> SubscriptionRecord | None:
-    state = _load_state()
-    record = state.get(str(user_id))
-    if not isinstance(record, dict):
-        return None
-    return record
+    with _state_lock:
+        _ensure_seeded()
+        with _connect() as connection:
+            return _fetch_record(connection, user_id)
 
 
 def is_subscription_active(user_id: int) -> bool:

@@ -28,6 +28,7 @@ DEFAULT_DNS = "1.1.1.1, 8.8.8.8"
 DEFAULT_MTU = 1280
 
 _state_lock = Lock()
+_seed_checked = False
 
 
 class PersonalConfigRecord(TypedDict):
@@ -134,9 +135,14 @@ def _encode_state_value(record: PersonalConfigRecord) -> tuple[Any, ...]:
 
 
 def _ensure_seeded() -> None:
+    global _seed_checked
+    if _seed_checked:
+        return
+
     with _connect() as connection:
         existing = connection.execute(f"SELECT COUNT(*) FROM {PERSONAL_CONFIGS_TABLE}").fetchone()
         if existing and int(existing[0]) > 0:
+            _seed_checked = True
             return
 
         raw_data = load_json_file(PERSONAL_CONFIGS_STORAGE_PATH, {})
@@ -185,6 +191,7 @@ def _ensure_seeded() -> None:
             )
 
         connection.commit()
+    _seed_checked = True
 
 
 def _load_state() -> PersonalConfigsState:
