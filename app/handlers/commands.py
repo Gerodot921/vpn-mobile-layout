@@ -9,6 +9,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from app.ads import get_ad_stats, set_active_ad, set_ad_active
+from app.crypto_payments import list_recent_orders
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import delete_free_access, get_total_free_claims, get_total_free_users, list_active_free_access_records
@@ -202,6 +203,7 @@ def _build_admin_help_lines() -> list[str]:
         "/adon — включить рекламу",
         "/adoff — выключить рекламу",
         "/adstats — статистика рекламы",
+        "/paystat [n] — последние платежи (по умолчанию 20)",
         "/profile_reset — сбросить личный VPN-профиль",
         "/clear_chat — очистить чат",
     ]
@@ -720,4 +722,40 @@ async def ad_stats_command(message: Message) -> None:
         f"click: {ad.get('click_url', '-')}",
         f"seconds: {ad.get('duration_sec', '-')}",
     ]
+    await _send_lines_report(message, lines)
+
+
+@router.message(Command(commands=["paystat", "paystats"]), F.func(_is_owner))
+async def payment_stats_command(message: Message, command: CommandObject | None = None) -> None:
+    raw_limit = (command.args or "").strip() if command else ""
+    try:
+        limit = int(raw_limit) if raw_limit else 20
+    except Exception:
+        await message.answer("Формат: /paystat [кол-во]\nПример: /paystat 30")
+        return
+
+    orders = list_recent_orders(limit)
+    if not orders:
+        await message.answer("Платежей пока нет")
+        return
+
+    lines: list[str] = ["💳 Последние платежи", ""]
+    for record in orders:
+        status = str(record.get("status") or "-")
+        order_id = str(record.get("order_id") or "-")
+        provider = str(record.get("provider") or "-")
+        user_id = int(record.get("user_id") or 0)
+        plan_name = str(record.get("plan_name") or "-")
+        amount = float(record.get("amount_rub") or 0)
+        created_at = _fmt_dt(str(record.get("created_at") or "-"))
+        paid_at_raw = record.get("paid_at")
+        paid_at = _fmt_dt(str(paid_at_raw)) if isinstance(paid_at_raw, str) and paid_at_raw else "-"
+        invoice_id = str(record.get("provider_invoice_id") or "-")
+
+        lines.append(
+            f"{order_id} | {status} | {provider} | {plan_name} | {amount:.2f} RUB | uid={user_id}"
+        )
+        lines.append(f"created={created_at} | paid={paid_at} | invoice={invoice_id}")
+        lines.append("")
+
     await _send_lines_report(message, lines)
