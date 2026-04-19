@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import os
+import json
 import secrets
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, TypedDict
 
-from app.json_storage import load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
 
 ADS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "ads.json"
 AD_SESSIONS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "ad_sessions.json"
+ADS_STATE_TABLE = "ads_state"
+AD_SESSIONS_TABLE = "ad_sessions"
 
 DEFAULT_AD_ASSET_URL = "https://media.tenor.com/zPU3mLwPo0IAAAAM/laughing-you-got-the-whole-squad-laughing.gif"
 DEFAULT_AD_DURATION_SECONDS = 30
@@ -53,6 +57,121 @@ def _parse_dt(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _connect() -> sqlite3.Connection:
+    STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {ADS_STATE_TABLE} (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            active_ad_json TEXT NOT NULL,
+            impressions INTEGER NOT NULL,
+            completions INTEGER NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {AD_SESSIONS_TABLE} (
+            session_token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            ad_id TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            completed INTEGER NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{AD_SESSIONS_TABLE}_user_id ON {AD_SESSIONS_TABLE}(user_id)"
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{AD_SESSIONS_TABLE}_expires_at ON {AD_SESSIONS_TABLE}(expires_at)"
+    )
+    return connection
+
+
+def _serialize_ad(ad: Ad) -> str:
+    return json.dumps(ad, ensure_ascii=False, sort_keys=True)
+
+
+def _deserialize_ad(raw: Any) -> Ad | None:
+    if isinstance(raw, str) and raw:
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return None
+    elif isinstance(raw, dict):
+        payload = raw
+    else:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    return {
+        "ad_id": str(payload.get("ad_id", "ad-default")),
+        "title": str(payload.get("title", "Рекламное предложение")),
+        "asset_url": str(payload.get("asset_url", _default_ad()["asset_url"])),
+        "click_url": str(payload.get("click_url", _default_ad()["click_url"])),
+        "duration_sec": int(payload.get("duration_sec", _default_ad()["duration_sec"])),
+        "active": bool(payload.get("active", True)),
+    }
+
+
+def _ensure_seeded() -> None:
+    with _connect() as connection:
+        existing = connection.execute(f"SELECT COUNT(*) FROM {ADS_STATE_TABLE}").fetchone()
+        if existing and int(existing[0]) > 0:
+            return
+
+        raw_data = load_json_file(ADS_STORAGE_PATH, {})
+        active_ad = _default_ad()
+        impressions = 0
+        completions = 0
+
+        if isinstance(raw_data, dict):
+            deserialized = _deserialize_ad(raw_data.get("active_ad"))
+            if deserialized is not None:
+                active_ad = deserialized
+            impressions_value = raw_data.get("impressions", 0)
+            completions_value = raw_data.get("completions", 0)
+            if isinstance(impressions_value, int) and impressions_value >= 0:
+                impressions = impressions_value
+            if isinstance(completions_value, int) and completions_value >= 0:
+                completions = completions_value
+
+        connection.execute(
+            f"INSERT OR REPLACE INTO {ADS_STATE_TABLE} (id, active_ad_json, impressions, completions) VALUES (1, ?, ?, ?)",
+            (_serialize_ad(active_ad), impressions, completions),
+        )
+
+        raw_sessions = load_json_file(AD_SESSIONS_STORAGE_PATH, {})
+        if isinstance(raw_sessions, dict):
+            for token, value in raw_sessions.items():
+                if not isinstance(token, str) or not isinstance(value, dict):
+                    continue
+                user_id = value.get("user_id")
+                ad_id = value.get("ad_id")
+                started_at = value.get("started_at")
+                expires_at = value.get("expires_at")
+                completed = value.get("completed", False)
+                if not isinstance(user_id, int) or not all(isinstance(item, str) for item in [ad_id, started_at, expires_at]):
+                    continue
+                connection.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {AD_SESSIONS_TABLE}
+                    (session_token, user_id, ad_id, started_at, expires_at, completed)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (token, user_id, ad_id, started_at, expires_at, 1 if bool(completed) else 0),
+                )
+
+        connection.commit()
+
+
 def _default_ad() -> Ad:
     asset_url = os.getenv("AD_DEFAULT_ASSET_URL", DEFAULT_AD_ASSET_URL).strip() or DEFAULT_AD_ASSET_URL
     click_url = os.getenv("AD_DEFAULT_CLICK_URL", asset_url).strip() or asset_url
@@ -76,73 +195,85 @@ def _default_ad() -> Ad:
 
 
 def _load_ad_state() -> AdState:
-    raw_data = load_json_file(ADS_STORAGE_PATH, {})
-    if not isinstance(raw_data, dict):
-        return {"active_ad": _default_ad(), "impressions": 0, "completions": 0}
+    _ensure_seeded()
+    with _connect() as connection:
+        row = connection.execute(
+            f"SELECT active_ad_json, impressions, completions FROM {ADS_STATE_TABLE} WHERE id = 1"
+        ).fetchone()
 
-    active_ad = raw_data.get("active_ad")
-    impressions = raw_data.get("impressions", 0)
-    completions = raw_data.get("completions", 0)
+    active_ad = _default_ad()
+    impressions = 0
+    completions = 0
+    if row is not None:
+        parsed_ad = _deserialize_ad(row[0])
+        if parsed_ad is not None:
+            active_ad = parsed_ad
+        impressions = int(row[1]) if isinstance(row[1], int) and row[1] >= 0 else 0
+        completions = int(row[2]) if isinstance(row[2], int) and row[2] >= 0 else 0
 
-    if not isinstance(active_ad, dict):
-        active_ad = _default_ad()
+    if active_ad["duration_sec"] <= 0:
+        active_ad["duration_sec"] = DEFAULT_AD_DURATION_SECONDS
 
-    normalized_ad: Ad = {
-        "ad_id": str(active_ad.get("ad_id", "ad-default")),
-        "title": str(active_ad.get("title", "Рекламное предложение")),
-        "asset_url": str(active_ad.get("asset_url", _default_ad()["asset_url"])),
-        "click_url": str(active_ad.get("click_url", _default_ad()["click_url"])),
-        "duration_sec": int(active_ad.get("duration_sec", _default_ad()["duration_sec"])),
-        "active": bool(active_ad.get("active", True)),
-    }
-
-    if normalized_ad["duration_sec"] <= 0:
-        normalized_ad["duration_sec"] = DEFAULT_AD_DURATION_SECONDS
-
-    return {
-        "active_ad": normalized_ad,
-        "impressions": impressions if isinstance(impressions, int) and impressions >= 0 else 0,
-        "completions": completions if isinstance(completions, int) and completions >= 0 else 0,
-    }
+    return {"active_ad": active_ad, "impressions": impressions, "completions": completions}
 
 
 def _save_ad_state(state: AdState) -> None:
+    with _connect() as connection:
+        connection.execute(
+            f"INSERT OR REPLACE INTO {ADS_STATE_TABLE} (id, active_ad_json, impressions, completions) VALUES (1, ?, ?, ?)",
+            (
+                _serialize_ad(state.get("active_ad") or _default_ad()),
+                int(state.get("impressions", 0)) if isinstance(state.get("impressions", 0), int) else 0,
+                int(state.get("completions", 0)) if isinstance(state.get("completions", 0), int) else 0,
+            ),
+        )
+        connection.commit()
+
     save_json_file(ADS_STORAGE_PATH, state)
 
 
 def _load_sessions() -> dict[str, AdSession]:
-    raw_data = load_json_file(AD_SESSIONS_STORAGE_PATH, {})
-    if not isinstance(raw_data, dict):
-        return {}
-
+    _ensure_seeded()
     sessions: dict[str, AdSession] = {}
-    for key, value in raw_data.items():
-        if not isinstance(key, str) or not isinstance(value, dict):
-            continue
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT session_token, user_id, ad_id, started_at, expires_at, completed FROM {AD_SESSIONS_TABLE}"
+        ).fetchall()
 
-        user_id = value.get("user_id")
-        ad_id = value.get("ad_id")
-        started_at = value.get("started_at")
-        expires_at = value.get("expires_at")
-        completed = value.get("completed", False)
-
-        if not isinstance(user_id, int):
-            continue
-        if not all(isinstance(item, str) for item in [ad_id, started_at, expires_at]):
-            continue
-
-        sessions[key] = {
-            "user_id": user_id,
-            "ad_id": ad_id,
-            "started_at": started_at,
-            "expires_at": expires_at,
-            "completed": bool(completed),
+    for row in rows:
+        token = str(row[0])
+        sessions[token] = {
+            "user_id": int(row[1]),
+            "ad_id": str(row[2]),
+            "started_at": str(row[3]),
+            "expires_at": str(row[4]),
+            "completed": bool(row[5]),
         }
 
     return sessions
 
 
 def _save_sessions(sessions: dict[str, AdSession]) -> None:
+    with _connect() as connection:
+        connection.execute(f"DELETE FROM {AD_SESSIONS_TABLE}")
+        for token, session in sessions.items():
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {AD_SESSIONS_TABLE}
+                (session_token, user_id, ad_id, started_at, expires_at, completed)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    token,
+                    int(session.get("user_id", 0)) if isinstance(session.get("user_id", 0), int) else 0,
+                    str(session.get("ad_id") or ""),
+                    str(session.get("started_at") or _now_utc().isoformat()),
+                    str(session.get("expires_at") or _now_utc().isoformat()),
+                    1 if bool(session.get("completed", False)) else 0,
+                ),
+            )
+        connection.commit()
+
     save_json_file(AD_SESSIONS_STORAGE_PATH, sessions)
 
 
