@@ -229,6 +229,7 @@ const state = {
   adSessionToken: null,
   adWatchSeconds: REWARD_WATCH_SECONDS,
   adAssetUrl: "",
+  adClickUrl: "",
   paidRemainingText: "неизвестно",
   paidExpiresAt: null,
   paymentMethod: "telegram_stars",
@@ -942,6 +943,14 @@ function hideAdOverlay() {
     adOverlay.classList.add("hidden");
     adOverlay.setAttribute("aria-hidden", "true");
   }
+  if (adMedia) {
+    adMedia.onclick = null;
+    adMedia.style.cursor = "default";
+  }
+  if (adCaption) {
+    adCaption.onclick = null;
+    adCaption.style.cursor = "default";
+  }
 }
 
 
@@ -961,14 +970,27 @@ function showAdOverlay(ad, watchSeconds) {
   clearAdCountdownTimer();
   const imageUrlRaw = typeof ad?.asset_url === "string" ? ad.asset_url : "";
   const imageUrl = imageUrlRaw || REWARD_AD_URL || DEFAULT_REWARD_AD_ASSET_URL;
+  const clickUrl = typeof ad?.click_url === "string" ? ad.click_url.trim() : "";
   const totalSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0 ? watchSeconds : REWARD_WATCH_SECONDS;
 
-  adCaption.textContent = `Просмотрите рекламу ${totalSeconds} секунд, чтобы открыть 1 час бесплатного VPN.`;
+  adCaption.textContent = clickUrl
+    ? `Просмотрите рекламу ${totalSeconds} секунд, чтобы открыть 1 час бесплатного VPN. Нажмите на баннер для перехода.`
+    : `Просмотрите рекламу ${totalSeconds} секунд, чтобы открыть 1 час бесплатного VPN.`;
   adMedia.src = imageUrl;
   adMedia.onerror = () => {
     adMedia.onerror = null;
     adMedia.src = DEFAULT_REWARD_AD_ASSET_URL;
   };
+  adMedia.style.cursor = clickUrl ? "pointer" : "default";
+  adCaption.style.cursor = clickUrl ? "pointer" : "default";
+  const onAdClick = () => {
+    if (!clickUrl) {
+      return;
+    }
+    openExternalLink(clickUrl);
+  };
+  adMedia.onclick = onAdClick;
+  adCaption.onclick = onAdClick;
   renderAdCountdown(totalSeconds);
   adOverlay.classList.remove("hidden");
   adOverlay.setAttribute("aria-hidden", "false");
@@ -1083,6 +1105,7 @@ async function startFreeServerAdFlow(server) {
       ? watchSeconds
       : REWARD_WATCH_SECONDS;
     state.adAssetUrl = typeof ad.asset_url === "string" ? ad.asset_url : "";
+    state.adClickUrl = typeof ad.click_url === "string" ? ad.click_url : "";
     state.rewardReadyAt = Date.now() + state.adWatchSeconds * 1000;
     saveRewardTimerState();
     syncFreeAccessPanel();
@@ -1101,6 +1124,7 @@ async function startFreeServerAdFlow(server) {
         state.adSessionToken = null;
         state.adWatchSeconds = REWARD_WATCH_SECONDS;
         state.adAssetUrl = "";
+        state.adClickUrl = "";
         applyUserState(accessData);
 
         state.serverIndex = serverConfigs.indexOf(server);
