@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file
 from app.wireguard import add_peer_to_server_by_values, remove_peer_from_server
 
 PERSONAL_CONFIGS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_configs.json"
@@ -215,8 +215,6 @@ def _save_state(state: PersonalConfigsState) -> None:
                 (config_id, *_encode_state_value(record)),
             )
         connection.commit()
-
-    save_json_file(PERSONAL_CONFIGS_STORAGE_PATH, state)
 
 
 def _configured_client_prefix() -> str:

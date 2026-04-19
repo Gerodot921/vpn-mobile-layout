@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, TypedDict
 
-from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file
 
 ADS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "ads.json"
 AD_SESSIONS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "ad_sessions.json"
@@ -229,8 +229,6 @@ def _save_ad_state(state: AdState) -> None:
         )
         connection.commit()
 
-    save_json_file(ADS_STORAGE_PATH, state)
-
 
 def _load_sessions() -> dict[str, AdSession]:
     _ensure_seeded()
@@ -273,8 +271,6 @@ def _save_sessions(sessions: dict[str, AdSession]) -> None:
                 ),
             )
         connection.commit()
-
-    save_json_file(AD_SESSIONS_STORAGE_PATH, sessions)
 
 
 def _session_ttl_seconds() -> int:

@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, TypedDict
 
-from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file
 from app.wireguard import ensure_wireguard_profile, get_wireguard_config_filename, remove_peer_from_server, reset_wireguard_profile
 
 FREE_ACCESS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "free_access.json"
@@ -249,8 +249,6 @@ def _save_state(state: FreeAccessState) -> None:
             )
         connection.commit()
 
-    save_json_file(FREE_ACCESS_STORAGE_PATH, state)
-
 
 def _load_stats() -> dict[str, object]:
     _ensure_seeded()
@@ -282,12 +280,6 @@ def _save_stats(stats: dict[str, object]) -> None:
             ),
         )
         connection.commit()
-
-    save_json_file(FREE_ACCESS_STATS_PATH, {
-        "total_claims": total_claims,
-        "unique_users": unique_users,
-        "claimed_user_ids": [str(item) for item in claimed_ids],
-    })
 
 
 def _new_key() -> str:

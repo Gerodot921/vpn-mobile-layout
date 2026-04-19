@@ -16,7 +16,7 @@ from typing import Any, TypedDict
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file
 
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
 WIREGUARD_STATE_TABLE = "wireguard_state"
@@ -303,8 +303,6 @@ def _save_state(state: WireGuardState) -> None:
                 ),
             )
         connection.commit()
-
-    save_json_file(WIREGUARD_STORAGE_PATH, state)
 
 
 def _user_key(user_id: int) -> str:

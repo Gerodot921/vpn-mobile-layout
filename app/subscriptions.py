@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, TypedDict
 
-from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file
 from app.keyboards.inline import subscription_inline_keyboard
 from app.texts import SUBSCRIPTION_REMINDER_TEXT_TEMPLATE
 
@@ -159,8 +159,6 @@ def _save_state(state: SubscriptionState) -> None:
                 ),
             )
         connection.commit()
-
-    save_json_file(SUBSCRIPTION_STORAGE_PATH, state)
 
 
 def _parse_expires_at(expires_at: str) -> datetime:
