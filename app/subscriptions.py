@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,6 +8,7 @@ from threading import Lock
 from typing import TypedDict
 
 from app.keyboards.inline import subscription_inline_keyboard
+from app.json_storage import load_json_file, save_json_file
 from app.texts import SUBSCRIPTION_REMINDER_TEXT_TEMPLATE
 
 SUBSCRIPTION_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "subscriptions.json"
@@ -36,19 +36,8 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _storage_parent() -> Path:
-    return SUBSCRIPTION_STORAGE_PATH.parent
-
-
 def _load_state() -> SubscriptionState:
-    if not SUBSCRIPTION_STORAGE_PATH.exists():
-        return {}
-
-    try:
-        raw_data = json.loads(SUBSCRIPTION_STORAGE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        logging.exception("Failed to load subscription storage; starting with empty state")
-        return {}
+    raw_data = load_json_file(SUBSCRIPTION_STORAGE_PATH, {})
 
     if not isinstance(raw_data, dict):
         return {}
@@ -72,13 +61,7 @@ def _load_state() -> SubscriptionState:
 
 
 def _save_state(state: SubscriptionState) -> None:
-    _storage_parent().mkdir(parents=True, exist_ok=True)
-    temp_path = SUBSCRIPTION_STORAGE_PATH.with_suffix(".json.tmp")
-    temp_path.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    temp_path.replace(SUBSCRIPTION_STORAGE_PATH)
+    save_json_file(SUBSCRIPTION_STORAGE_PATH, state)
 
 
 def _parse_expires_at(expires_at: str) -> datetime:
@@ -221,25 +204,6 @@ def get_subscription_plan_name(user_id: int) -> str:
         return "Базовый"
     plan_name = record.get("plan_name", "Базовый")
     return plan_name if isinstance(plan_name, str) and plan_name else "Базовый"
-
-
-def get_subscription_record(user_id: int) -> SubscriptionRecord | None:
-    state = _load_state()
-    record = state.get(str(user_id))
-    if not isinstance(record, dict):
-        return None
-    return record
-
-
-def is_subscription_active(user_id: int) -> bool:
-    record = get_subscription_record(user_id)
-    if record is None:
-        return False
-
-    try:
-        return _parse_expires_at(record["expires_at"]) > _now_utc()
-    except Exception:
-        return False
 
 
 def get_subscription_record(user_id: int) -> SubscriptionRecord | None:
