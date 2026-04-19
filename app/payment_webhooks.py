@@ -172,3 +172,26 @@ def list_recent_payment_webhook_events(
         )
 
     return events
+
+
+def get_payment_webhook_status_summary(*, provider: str | None = None) -> dict[str, int]:
+    provider_filter = provider.strip().lower() if isinstance(provider, str) and provider.strip() else None
+
+    with _state_lock:
+        with _connect() as connection:
+            if provider_filter:
+                rows = connection.execute(
+                    f"SELECT status, COUNT(*) FROM {PAYMENT_WEBHOOK_EVENTS_TABLE} WHERE provider = ? GROUP BY status",
+                    (provider_filter,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    f"SELECT status, COUNT(*) FROM {PAYMENT_WEBHOOK_EVENTS_TABLE} GROUP BY status"
+                ).fetchall()
+
+    summary: dict[str, int] = {}
+    for row in rows:
+        status = str(row[0]) if row[0] is not None else "unknown"
+        summary[status] = int(row[1])
+
+    return summary

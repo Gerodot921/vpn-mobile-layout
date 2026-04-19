@@ -14,7 +14,7 @@ from app.json_storage import get_storage_diagnostics
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import delete_free_access, get_total_free_claims, get_total_free_users, list_active_free_access_records
-from app.payment_webhooks import list_recent_payment_webhook_events
+from app.payment_webhooks import get_payment_webhook_status_summary, list_recent_payment_webhook_events
 from app.personal_configs import assign_personal_config_to_user, create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, list_registered_users, upsert_username
 from app.subscriptions import delete_subscription, ensure_subscription, get_remaining_text, get_subscription_plan_name
@@ -758,6 +758,14 @@ async def diagnostics_command(message: Message) -> None:
             name = str(table.get("name") or "-")
             rows = int(table.get("rows") or 0)
             lines.append(f"- {name}: {rows}")
+
+    webhook_summary = get_payment_webhook_status_summary(provider="cryptocloud")
+    if webhook_summary:
+        lines.append("")
+        lines.append("Webhook-статусы:")
+        for status_name in ("processed", "duplicate", "ignored", "rejected", "error"):
+            if status_name in webhook_summary:
+                lines.append(f"- {status_name}: {webhook_summary[status_name]}")
 
     await _send_lines_report(message, lines)
 
