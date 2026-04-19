@@ -302,8 +302,10 @@ def start_ad_session(user_id: int) -> tuple[Ad | None, str | None]:
     with _state_lock:
         state = _load_ad_state()
         ad = state["active_ad"]
-        if not ad.get("active"):
-            return None, None
+        # Free-access flow always requires an ad watch. Even when ad campaign is
+        # toggled off for marketing, we still start a reward ad session.
+        if not isinstance(ad, dict):
+            ad = _default_ad()
 
         token = f"ad_{secrets.token_urlsafe(20)}"
         now = _now_utc()
