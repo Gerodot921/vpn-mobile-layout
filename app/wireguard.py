@@ -104,8 +104,8 @@ def _connect() -> sqlite3.Connection:
 
 def _profile_row_to_record(row: tuple[Any, ...]) -> WireGuardProfile:
     return {
-        "profile_id": str(row[0]),
-        "user_id": int(row[1]),
+        "user_id": int(row[0]),
+        "profile_id": str(row[1]),
         "private_key": str(row[2]),
         "public_key": str(row[3]),
         "preshared_key": str(row[4]),

@@ -82,7 +82,8 @@ def _connect() -> sqlite3.Connection:
         f"CREATE INDEX IF NOT EXISTS idx_{FREE_ACCESS_TABLE}_expires_at ON {FREE_ACCESS_TABLE}(expires_at)"
     )
     connection.execute(
-        f"CREATE TABLE IF NOT EXISTS {FREE_ACCESS_STATS_TABLE} (
+        f"""
+        CREATE TABLE IF NOT EXISTS {FREE_ACCESS_STATS_TABLE} (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             total_claims INTEGER NOT NULL,
             unique_users INTEGER NOT NULL,
