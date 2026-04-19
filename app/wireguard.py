@@ -103,9 +103,15 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
-def _profile_row_to_record(row: tuple[Any, ...]) -> WireGuardProfile:
+def _profile_row_to_record(row: tuple[Any, ...]) -> WireGuardProfile | None:
+    try:
+        user_id = int(row[0])
+        mtu = int(row[9])
+    except Exception:
+        return None
+
     return {
-        "user_id": int(row[0]),
+        "user_id": user_id,
         "profile_id": str(row[1]),
         "private_key": str(row[2]),
         "public_key": str(row[3]),
@@ -114,7 +120,7 @@ def _profile_row_to_record(row: tuple[Any, ...]) -> WireGuardProfile:
         "endpoint": str(row[6]),
         "dns": str(row[7]),
         "allowed_ips": str(row[8]),
-        "mtu": int(row[9]),
+        "mtu": mtu,
         "configured": bool(row[10]),
         "created_at": str(row[11]),
         "updated_at": str(row[12]),
@@ -130,7 +136,18 @@ def _fetch_profile(connection: sqlite3.Connection, user_id: int) -> WireGuardPro
     ).fetchone()
     if row is None:
         return None
-    return _profile_row_to_record(row)
+
+    profile = _profile_row_to_record(row)
+    if profile is not None:
+        return profile
+
+    # Cleanup malformed row to avoid repeated crashes and allow regeneration.
+    connection.execute(
+        f"DELETE FROM {WIREGUARD_PROFILES_TABLE} WHERE user_id = ?",
+        (str(user_id),),
+    )
+    connection.commit()
+    return None
 
 
 def _state_to_json(state: WireGuardState) -> str:
@@ -280,6 +297,8 @@ def _load_state() -> WireGuardState:
 
     for row in rows:
         profile = _profile_row_to_record(row)
+        if profile is None:
+            continue
         state["profiles"][str(profile["user_id"])] = profile
 
     return state
