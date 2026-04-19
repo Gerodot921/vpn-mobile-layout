@@ -7,7 +7,7 @@ import logging
 import os
 import uuid
 from typing import Any
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, quote_plus
 
 from aiohttp import web
 
@@ -38,6 +38,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "price_rub": 50,
         "days": 30,
         "stars": 1,
+        "crypto_ton": 0.1,
     },
     "standard": {
         "code": "standard",
@@ -45,6 +46,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "price_rub": 129,
         "days": 30,
         "stars": 225,
+        "crypto_ton": 0.26,
     },
     "family": {
         "code": "family",
@@ -52,6 +54,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "price_rub": 299,
         "days": 90,
         "stars": 525,
+        "crypto_ton": 0.6,
     },
     "premium": {
         "code": "premium",
@@ -59,8 +62,11 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "price_rub": 999,
         "days": 365,
         "stars": 1750,
+        "crypto_ton": 2.0,
     },
 }
+
+DEFAULT_CRYPTO_TON_WALLET = "UQDNgjWaGw6Jau70YILv_MkiyiIkY24AVDrnfyAz9Pc4chca"
 
 
 def _resolve_payment_plan(plan_code: str) -> dict[str, Any] | None:
@@ -77,6 +83,19 @@ def _build_template_payment_url(template: str, user_id: int, plan: dict[str, Any
         amount_rub=plan["price_rub"],
         days=plan["days"],
     )
+
+
+def _ton_to_nanotons(value_ton: float) -> int:
+    try:
+        return max(0, int(round(float(value_ton) * 1_000_000_000)))
+    except Exception:
+        return 0
+
+
+def _build_tonkeeper_payment_url(wallet_address: str, amount_ton: float, memo_text: str) -> str:
+    amount_nano = _ton_to_nanotons(amount_ton)
+    encoded_text = quote_plus(memo_text)
+    return f"https://app.tonkeeper.com/transfer/{wallet_address}?amount={amount_nano}&text={encoded_text}"
 
 
 def _bot_token() -> str:
@@ -478,13 +497,19 @@ async def payment_create(request: web.Request) -> web.Response:
             elif static_url:
                 payment_url = static_url
             else:
-                return web.json_response(
-                    {
-                        "ok": False,
-                        "error": "Crypto payment URL is not configured",
-                    },
-                    status=503,
-                )
+                wallet_address = os.getenv("PAYMENT_CRYPTO_TON_WALLET", "").strip() or DEFAULT_CRYPTO_TON_WALLET
+                amount_ton = float(plan.get("crypto_ton") or 0)
+                order_id = f"crypto-{uuid.uuid4().hex[:10]}"
+                memo_text = f"SkullVPN {plan['code']} uid:{user_id} oid:{order_id}"
+                if not wallet_address or amount_ton <= 0:
+                    return web.json_response(
+                        {
+                            "ok": False,
+                            "error": "Crypto payment URL is not configured",
+                        },
+                        status=503,
+                    )
+                payment_url = _build_tonkeeper_payment_url(wallet_address, amount_ton, memo_text)
 
             return web.json_response(
                 {
@@ -492,6 +517,8 @@ async def payment_create(request: web.Request) -> web.Response:
                     "method": method,
                     "plan": plan,
                     "payment_url": payment_url,
+                    "wallet_address": os.getenv("PAYMENT_CRYPTO_TON_WALLET", "").strip() or DEFAULT_CRYPTO_TON_WALLET,
+                    "network": "TON",
                 }
             )
 
