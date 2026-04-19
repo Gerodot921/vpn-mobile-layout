@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import secrets
 import subprocess
 import shutil
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import load_json_file, save_json_file
+from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
 
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
+WIREGUARD_STATE_TABLE = "wireguard_state"
+WIREGUARD_PROFILES_TABLE = "wireguard_profiles"
 
 DEFAULT_ALLOWED_IPS = "0.0.0.0/0"
 DEFAULT_DNS = "1.1.1.1, 8.8.8.8"
@@ -55,19 +59,78 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _state_default() -> WireGuardState:
+def _connect() -> sqlite3.Connection:
+    STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {WIREGUARD_STATE_TABLE} (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            next_client_octet INTEGER NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {WIREGUARD_PROFILES_TABLE} (
+            user_id TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            preshared_key TEXT NOT NULL,
+            address TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            dns TEXT NOT NULL,
+            allowed_ips TEXT NOT NULL,
+            mtu INTEGER NOT NULL,
+            configured INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            config_text TEXT NOT NULL,
+            config_filename TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{WIREGUARD_PROFILES_TABLE}_public_key ON {WIREGUARD_PROFILES_TABLE}(public_key)"
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{WIREGUARD_PROFILES_TABLE}_address ON {WIREGUARD_PROFILES_TABLE}(address)"
+    )
+    return connection
+
+
+def _profile_row_to_record(row: tuple[Any, ...]) -> WireGuardProfile:
     return {
-        "next_client_octet": DEFAULT_CLIENT_START_OCTET,
-        "profiles": {},
+        "profile_id": str(row[0]),
+        "user_id": int(row[1]),
+        "private_key": str(row[2]),
+        "public_key": str(row[3]),
+        "preshared_key": str(row[4]),
+        "address": str(row[5]),
+        "endpoint": str(row[6]),
+        "dns": str(row[7]),
+        "allowed_ips": str(row[8]),
+        "mtu": int(row[9]),
+        "configured": bool(row[10]),
+        "created_at": str(row[11]),
+        "updated_at": str(row[12]),
+        "config_text": str(row[13]),
+        "config_filename": str(row[14]),
     }
 
 
-def _load_state() -> WireGuardState:
-    raw_data = load_json_file(WIREGUARD_STORAGE_PATH, _state_default())
-    if not isinstance(raw_data, dict):
-        return _state_default()
+def _state_to_json(state: WireGuardState) -> str:
+    return json.dumps(state, ensure_ascii=False, sort_keys=True)
 
+
+def _state_from_json(raw_data: Any) -> WireGuardState:
     state = _state_default()
+    if not isinstance(raw_data, dict):
+        return state
+
     next_client_octet = raw_data.get("next_client_octet", DEFAULT_CLIENT_START_OCTET)
     if isinstance(next_client_octet, int) and next_client_octet >= DEFAULT_CLIENT_START_OCTET:
         state["next_client_octet"] = next_client_octet
@@ -130,7 +193,117 @@ def _load_state() -> WireGuardState:
     return state
 
 
+def _ensure_seeded() -> None:
+    with _connect() as connection:
+        state_exists = connection.execute(f"SELECT COUNT(*) FROM {WIREGUARD_STATE_TABLE}").fetchone()
+        profiles_exist = connection.execute(f"SELECT COUNT(*) FROM {WIREGUARD_PROFILES_TABLE}").fetchone()
+        if state_exists and int(state_exists[0]) > 0 and profiles_exist and int(profiles_exist[0]) > 0:
+            return
+
+        raw_data = load_json_file(WIREGUARD_STORAGE_PATH, _state_default())
+        state = _state_from_json(raw_data)
+
+        connection.execute(
+            f"INSERT OR REPLACE INTO {WIREGUARD_STATE_TABLE} (id, next_client_octet) VALUES (1, ?)",
+            (int(state.get("next_client_octet", DEFAULT_CLIENT_START_OCTET)),),
+        )
+
+        for user_key, profile in state.get("profiles", {}).items():
+            if not isinstance(profile, dict):
+                continue
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {WIREGUARD_PROFILES_TABLE}
+                (user_id, profile_id, private_key, public_key, preshared_key, address, endpoint, dns, allowed_ips, mtu, configured, created_at, updated_at, config_text, config_filename)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_key,
+                    str(profile.get("profile_id") or ""),
+                    str(profile.get("private_key") or ""),
+                    str(profile.get("public_key") or ""),
+                    str(profile.get("preshared_key") or ""),
+                    str(profile.get("address") or ""),
+                    str(profile.get("endpoint") or ""),
+                    str(profile.get("dns") or ""),
+                    str(profile.get("allowed_ips") or ""),
+                    int(profile.get("mtu", DEFAULT_MTU)) if isinstance(profile.get("mtu", DEFAULT_MTU), int) else DEFAULT_MTU,
+                    1 if bool(profile.get("configured", False)) else 0,
+                    str(profile.get("created_at") or _now_utc().isoformat()),
+                    str(profile.get("updated_at") or _now_utc().isoformat()),
+                    str(profile.get("config_text") or ""),
+                    str(profile.get("config_filename") or _build_profile_filename(str(profile.get("profile_id") or "WG"))),
+                ),
+            )
+
+        connection.commit()
+
+
+def _state_default() -> WireGuardState:
+    return {
+        "next_client_octet": DEFAULT_CLIENT_START_OCTET,
+        "profiles": {},
+    }
+
+
+def _load_state() -> WireGuardState:
+    _ensure_seeded()
+    state = _state_default()
+
+    with _connect() as connection:
+        state_row = connection.execute(
+            f"SELECT next_client_octet FROM {WIREGUARD_STATE_TABLE} WHERE id = 1"
+        ).fetchone()
+        if state_row is not None and isinstance(state_row[0], int) and state_row[0] >= DEFAULT_CLIENT_START_OCTET:
+            state["next_client_octet"] = state_row[0]
+
+        rows = connection.execute(
+            f"SELECT user_id, profile_id, private_key, public_key, preshared_key, address, endpoint, dns, allowed_ips, mtu, configured, created_at, updated_at, config_text, config_filename FROM {WIREGUARD_PROFILES_TABLE}"
+        ).fetchall()
+
+    for row in rows:
+        profile = _profile_row_to_record(row)
+        state["profiles"][str(profile["user_id"])] = profile
+
+    return state
+
+
 def _save_state(state: WireGuardState) -> None:
+    with _connect() as connection:
+        connection.execute(
+            f"INSERT OR REPLACE INTO {WIREGUARD_STATE_TABLE} (id, next_client_octet) VALUES (1, ?)",
+            (int(state.get("next_client_octet", DEFAULT_CLIENT_START_OCTET)),),
+        )
+        connection.execute(f"DELETE FROM {WIREGUARD_PROFILES_TABLE}")
+        for user_key, profile in state.get("profiles", {}).items():
+            if not isinstance(profile, dict):
+                continue
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {WIREGUARD_PROFILES_TABLE}
+                (user_id, profile_id, private_key, public_key, preshared_key, address, endpoint, dns, allowed_ips, mtu, configured, created_at, updated_at, config_text, config_filename)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_key,
+                    str(profile.get("profile_id") or ""),
+                    str(profile.get("private_key") or ""),
+                    str(profile.get("public_key") or ""),
+                    str(profile.get("preshared_key") or ""),
+                    str(profile.get("address") or ""),
+                    str(profile.get("endpoint") or ""),
+                    str(profile.get("dns") or ""),
+                    str(profile.get("allowed_ips") or ""),
+                    int(profile.get("mtu", DEFAULT_MTU)) if isinstance(profile.get("mtu", DEFAULT_MTU), int) else DEFAULT_MTU,
+                    1 if bool(profile.get("configured", False)) else 0,
+                    str(profile.get("created_at") or _now_utc().isoformat()),
+                    str(profile.get("updated_at") or _now_utc().isoformat()),
+                    str(profile.get("config_text") or ""),
+                    str(profile.get("config_filename") or _build_profile_filename(str(profile.get("profile_id") or "WG"))),
+                ),
+            )
+        connection.commit()
+
     save_json_file(WIREGUARD_STORAGE_PATH, state)
 
 
