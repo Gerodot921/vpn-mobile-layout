@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import TypedDict
+from typing import Any, TypedDict
 
+from app.json_storage import STORAGE_DB_PATH, load_json_file, save_json_file
 from app.keyboards.inline import subscription_inline_keyboard
-from app.json_storage import load_json_file, save_json_file
 from app.texts import SUBSCRIPTION_REMINDER_TEXT_TEMPLATE
 
 SUBSCRIPTION_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "subscriptions.json"
+SUBSCRIPTIONS_TABLE = "subscriptions"
 DEFAULT_SUBSCRIPTION_DAYS = 30
 CHECK_INTERVAL_SECONDS = 1800
 REMINDER_WINDOWS: tuple[tuple[int, timedelta, timedelta], ...] = (
@@ -36,31 +39,127 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _connect() -> sqlite3.Connection:
+    STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {SUBSCRIPTIONS_TABLE} (
+            user_id TEXT PRIMARY KEY,
+            expires_at TEXT NOT NULL,
+            reminders_sent_json TEXT NOT NULL,
+            plan_name TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{SUBSCRIPTIONS_TABLE}_expires_at ON {SUBSCRIPTIONS_TABLE}(expires_at)"
+    )
+    return connection
+
+
+def _encode_reminders(reminders_sent: list[int]) -> str:
+    return json.dumps(sorted({int(item) for item in reminders_sent if isinstance(item, int)}), ensure_ascii=False)
+
+
+def _decode_reminders(raw: Any) -> list[int]:
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = []
+    elif isinstance(raw, list):
+        parsed = raw
+    else:
+        parsed = []
+
+    if not isinstance(parsed, list):
+        return []
+    return [int(item) for item in parsed if isinstance(item, int)]
+
+
+def _row_to_record(row: tuple[Any, ...]) -> tuple[str, SubscriptionRecord]:
+    user_id = str(row[0])
+    return user_id, {
+        "expires_at": str(row[1]),
+        "reminders_sent": _decode_reminders(row[2]),
+        "plan_name": str(row[3]) if isinstance(row[3], str) and row[3] else "Базовый",
+    }
+
+
+def _ensure_seeded() -> None:
+    with _connect() as connection:
+        existing = connection.execute(f"SELECT COUNT(*) FROM {SUBSCRIPTIONS_TABLE}").fetchone()
+        if existing and int(existing[0]) > 0:
+            return
+
+        raw_data = load_json_file(SUBSCRIPTION_STORAGE_PATH, {})
+        if not isinstance(raw_data, dict) or not raw_data:
+            return
+
+        for key, value in raw_data.items():
+            if not isinstance(key, str) or not isinstance(value, dict):
+                continue
+
+            expires_at = value.get("expires_at")
+            reminders_sent = value.get("reminders_sent", [])
+            plan_name = value.get("plan_name", "Базовый")
+            if not isinstance(expires_at, str):
+                continue
+
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {SUBSCRIPTIONS_TABLE}
+                (user_id, expires_at, reminders_sent_json, plan_name)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    key,
+                    expires_at,
+                    _encode_reminders(reminders_sent if isinstance(reminders_sent, list) else []),
+                    plan_name if isinstance(plan_name, str) and plan_name else "Базовый",
+                ),
+            )
+
+        connection.commit()
+
+
 def _load_state() -> SubscriptionState:
-    raw_data = load_json_file(SUBSCRIPTION_STORAGE_PATH, {})
-
-    if not isinstance(raw_data, dict):
-        return {}
-
+    _ensure_seeded()
     state: SubscriptionState = {}
-    for key, value in raw_data.items():
-        if not isinstance(key, str) or not isinstance(value, dict):
-            continue
-        expires_at = value.get("expires_at")
-        reminders_sent = value.get("reminders_sent", [])
-        plan_name = value.get("plan_name", "Базовый")
-        if not isinstance(expires_at, str) or not isinstance(reminders_sent, list):
-            continue
-        state[key] = {
-            "expires_at": expires_at,
-            "reminders_sent": [int(item) for item in reminders_sent if isinstance(item, int)],
-            "plan_name": plan_name if isinstance(plan_name, str) and plan_name else "Базовый",
-        }
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT user_id, expires_at, reminders_sent_json, plan_name FROM {SUBSCRIPTIONS_TABLE}"
+        ).fetchall()
+
+    for row in rows:
+        user_key, record = _row_to_record(row)
+        state[user_key] = record
 
     return state
 
 
 def _save_state(state: SubscriptionState) -> None:
+    with _connect() as connection:
+        connection.execute(f"DELETE FROM {SUBSCRIPTIONS_TABLE}")
+        for user_key, record in state.items():
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {SUBSCRIPTIONS_TABLE}
+                (user_id, expires_at, reminders_sent_json, plan_name)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    user_key,
+                    str(record.get("expires_at") or _now_utc().isoformat()),
+                    _encode_reminders(record.get("reminders_sent", [])),
+                    str(record.get("plan_name") or "Базовый"),
+                ),
+            )
+        connection.commit()
+
     save_json_file(SUBSCRIPTION_STORAGE_PATH, state)
 
 
