@@ -631,6 +631,11 @@ function renderServerList() {
     `;
 
     item.addEventListener("click", () => {
+      if (server.status === "offline") {
+        showToast("Этот сервер временно недоступен");
+        return;
+      }
+
       if (server.access === "free" && !hasFreeAccess()) {
         void startFreeServerAdFlow(server);
         return;
@@ -639,11 +644,6 @@ function renderServerList() {
       if (locked && !canAccessServer(server)) {
         showToast("Для этого сервера нужна подписка");
         subscriptionBtn.click();
-        return;
-      }
-
-      if (server.status === "offline") {
-        showToast("Этот сервер временно недоступен");
         return;
       }
 
@@ -671,6 +671,30 @@ function scrollToServersPanel() {
     return;
   }
   serversPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+
+function handleConnectClick() {
+  const active = currentServer();
+
+  if (active.status === "offline") {
+    showToast("Текущий сервер временно недоступен. Выберите другой сервер.");
+    scrollToServersPanel();
+    return;
+  }
+
+  if (active.access === "free" && !hasFreeAccess()) {
+    void startFreeServerAdFlow(active);
+    return;
+  }
+
+  if (active.access === "paid" && !hasPaidAccess()) {
+    showToast("Для этого сервера нужна подписка");
+    openPaymentModal();
+    return;
+  }
+
+  tryOpenAmnezia();
 }
 
 function setChip(statusClass, text) {
@@ -1399,7 +1423,7 @@ function bootstrapFromTelegram() {
   }
 }
 
-connectBtn.addEventListener("click", scrollToServersPanel);
+connectBtn.addEventListener("click", handleConnectClick);
 openAgainBtn.addEventListener("click", tryOpenAmnezia);
 checkBtn.addEventListener("click", verifyConnection);
 
