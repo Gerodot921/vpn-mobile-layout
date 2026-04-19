@@ -37,7 +37,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "name": "Базовый",
         "price_rub": 50,
         "days": 30,
-        "stars": 90,
+        "stars": 1,
     },
     "standard": {
         "code": "standard",
