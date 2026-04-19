@@ -655,63 +655,12 @@ async def payment_create(request: web.Request) -> web.Response:
             )
 
         if method == "crypto":
-            order_id = f"cc-{user_id}-{uuid.uuid4().hex[:10]}"
-            api_token, shop_id = _cryptocloud_credentials()
-            provider_invoice_id: str | None = None
-
-            if api_token and shop_id:
-                try:
-                    payment_url, provider_invoice_id = await _create_cryptocloud_invoice(
-                        user_id=user_id,
-                        plan=plan,
-                        order_id=order_id,
-                    )
-                except Exception as exc:
-                    logging.exception("CryptoCloud invoice creation failed for user_id=%s", user_id)
-                    return web.json_response(
-                        {
-                            "ok": False,
-                            "error": f"CryptoCloud error: {exc}",
-                        },
-                        status=502,
-                    )
-            else:
-                # Legacy fallback: direct Tonkeeper transfer link if CryptoCloud is not configured.
-                wallet_address = os.getenv("PAYMENT_CRYPTO_TON_WALLET", "").strip() or DEFAULT_CRYPTO_TON_WALLET
-                amount_ton = float(plan.get("crypto_ton") or 0)
-                memo_text = f"SkullVPN {plan['code']} uid:{user_id} oid:{order_id}"
-                if not wallet_address or amount_ton <= 0:
-                    return web.json_response(
-                        {
-                            "ok": False,
-                            "error": "Crypto payment is not configured",
-                        },
-                        status=503,
-                    )
-                payment_url = _build_tonkeeper_payment_url(wallet_address, amount_ton, memo_text)
-
-            create_crypto_order(
-                order_id=order_id,
-                user_id=user_id,
-                plan_code=plan["code"],
-                plan_name=plan["name"],
-                days=int(plan["days"]),
-                amount_rub=float(plan["price_rub"]),
-                provider_invoice_id=provider_invoice_id,
-                invoice_url=payment_url,
-            )
-
             return web.json_response(
                 {
-                    "ok": True,
-                    "method": method,
-                    "plan": plan,
-                    "payment_url": payment_url,
-                    "order_id": order_id,
-                    "provider": "cryptocloud" if api_token and shop_id else "tonkeeper",
-                    "wallet_address": os.getenv("PAYMENT_CRYPTO_TON_WALLET", "").strip() or DEFAULT_CRYPTO_TON_WALLET,
-                    "network": "TON",
-                }
+                    "ok": False,
+                    "error": "Crypto payment method is disabled",
+                },
+                status=400,
             )
 
         return web.json_response({"ok": False, "error": "Unsupported payment method"}, status=400)

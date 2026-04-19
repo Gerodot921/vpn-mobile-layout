@@ -78,6 +78,7 @@ const serversPanel = document.getElementById("serversPanel");
 
 const INSTALL_AMNEZIA_URL = "https://amnezia.org/ru/downloads";
 const REWARD_AD_URL = "";
+const DEFAULT_REWARD_AD_ASSET_URL = "https://media.tenor.com/zPU3mLwPo0IAAAAM/laughing-you-got-the-whole-squad-laughing.gif";
 const REWARD_WATCH_SECONDS = 30;
 const REWARD_READY_STORAGE_KEY = "skull_vpn_reward_ready_at_v1";
 const ONBOARDING_KEY = "skull_vpn_onboarding_seen_v2";
@@ -92,11 +93,6 @@ const PAYMENT_METHODS = [
     code: "sbp",
     title: "СБП",
     meta: "Банковский перевод",
-  },
-  {
-    code: "crypto",
-    title: "Crypto",
-    meta: "USDT / TON",
   },
 ];
 
@@ -675,26 +671,7 @@ function scrollToServersPanel() {
 
 
 function handleConnectClick() {
-  const active = currentServer();
-
-  if (active.status === "offline") {
-    showToast("Текущий сервер временно недоступен. Выберите другой сервер.");
-    scrollToServersPanel();
-    return;
-  }
-
-  if (active.access === "free" && !hasFreeAccess()) {
-    void startFreeServerAdFlow(active);
-    return;
-  }
-
-  if (active.access === "paid" && !hasPaidAccess()) {
-    showToast("Для этого сервера нужна подписка");
-    openPaymentModal();
-    return;
-  }
-
-  tryOpenAmnezia();
+  scrollToServersPanel();
 }
 
 function setChip(statusClass, text) {
@@ -982,11 +959,16 @@ function showAdOverlay(ad, watchSeconds) {
   }
 
   clearAdCountdownTimer();
-  const imageUrl = typeof ad?.asset_url === "string" ? ad.asset_url : "";
+  const imageUrlRaw = typeof ad?.asset_url === "string" ? ad.asset_url : "";
+  const imageUrl = imageUrlRaw || REWARD_AD_URL || DEFAULT_REWARD_AD_ASSET_URL;
   const totalSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0 ? watchSeconds : REWARD_WATCH_SECONDS;
 
   adCaption.textContent = `Просмотрите рекламу ${totalSeconds} секунд, чтобы открыть 1 час бесплатного VPN.`;
   adMedia.src = imageUrl;
+  adMedia.onerror = () => {
+    adMedia.onerror = null;
+    adMedia.src = DEFAULT_REWARD_AD_ASSET_URL;
+  };
   renderAdCountdown(totalSeconds);
   adOverlay.classList.remove("hidden");
   adOverlay.setAttribute("aria-hidden", "false");
@@ -1088,6 +1070,10 @@ async function startFreeServerAdFlow(server) {
 
   freeServerAdInProgress = true;
   try {
+    // Open overlay immediately so user always sees ad window feedback.
+    state.adWatchSeconds = REWARD_WATCH_SECONDS;
+    showAdOverlay({ asset_url: REWARD_AD_URL || DEFAULT_REWARD_AD_ASSET_URL }, state.adWatchSeconds);
+
     const data = await requestAdSession();
     const ad = data?.ad || {};
     const watchSeconds = Number(ad.duration_sec || REWARD_WATCH_SECONDS);
