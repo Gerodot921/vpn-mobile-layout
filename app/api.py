@@ -9,12 +9,18 @@ import uuid
 from typing import Any
 from urllib.parse import parse_qsl, quote_plus
 
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, web
 
 from aiogram import Bot
 from aiogram.types import BufferedInputFile, LabeledPrice
 
 from app.ads import complete_ad_session, start_ad_session
+from app.crypto_payments import (
+    create_crypto_order,
+    get_order_by_id,
+    get_order_by_provider_invoice_id,
+    mark_order_paid,
+)
 from app.free_access import (
     DEFAULT_FREE_ACCESS_HOURS,
     format_free_access_remaining_text,
@@ -28,6 +34,7 @@ from app.personal_configs import get_active_personal_config_for_user
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.wireguard import ensure_wireguard_profile
 from app.subscriptions import get_remaining_text, get_subscription_plan_name, get_subscription_record, is_subscription_active
+from app.subscriptions import extend_subscription
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
 
 
@@ -67,6 +74,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 DEFAULT_CRYPTO_TON_WALLET = "UQDNgjWaGw6Jau70YILv_MkiyiIkY24AVDrnfyAz9Pc4chca"
+OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
 
 
 def _resolve_payment_plan(plan_code: str) -> dict[str, Any] | None:
@@ -96,6 +104,142 @@ def _build_tonkeeper_payment_url(wallet_address: str, amount_ton: float, memo_te
     amount_nano = _ton_to_nanotons(amount_ton)
     encoded_text = quote_plus(memo_text)
     return f"https://app.tonkeeper.com/transfer/{wallet_address}?amount={amount_nano}&text={encoded_text}"
+
+
+def _cryptocloud_base_url() -> str:
+    return os.getenv("CRYPTOCLOUD_API_BASE_URL", "https://api.cryptocloud.plus/v2").strip().rstrip("/")
+
+
+def _cryptocloud_credentials() -> tuple[str, str]:
+    api_token = os.getenv("CRYPTOCLOUD_API_TOKEN", "").strip()
+    shop_id = os.getenv("CRYPTOCLOUD_SHOP_ID", "").strip()
+    return api_token, shop_id
+
+
+async def _create_cryptocloud_invoice(
+    *,
+    user_id: int,
+    plan: dict[str, Any],
+    order_id: str,
+) -> tuple[str, str | None]:
+    api_token, shop_id = _cryptocloud_credentials()
+    if not api_token or not shop_id:
+        raise RuntimeError("CryptoCloud is not configured")
+
+    callback_url = os.getenv("CRYPTOCLOUD_WEBHOOK_URL", "").strip()
+    payload: dict[str, Any] = {
+        "shop_id": shop_id,
+        "amount": str(plan["price_rub"]),
+        "currency": "RUB",
+        "order_id": order_id,
+        "desc": f"SkullVPN {plan['name']} ({plan['days']} дней) uid:{user_id}",
+    }
+    if callback_url:
+        payload["callback_url"] = callback_url
+
+    headers = {
+        "Authorization": f"Token {api_token}",
+        "Content-Type": "application/json",
+    }
+
+    timeout = ClientTimeout(total=20)
+    endpoint = f"{_cryptocloud_base_url()}/invoice/create"
+    async with ClientSession(timeout=timeout) as session:
+        async with session.post(endpoint, json=payload, headers=headers) as response:
+            body = await response.json(content_type=None)
+            if response.status >= 400:
+                raise RuntimeError(f"CryptoCloud HTTP {response.status}: {body}")
+
+    result = body.get("result") if isinstance(body, dict) else None
+    invoice_url = None
+    provider_invoice_id = None
+    if isinstance(result, dict):
+        invoice_url = (
+            result.get("link")
+            or result.get("invoice_url")
+            or result.get("url")
+            or result.get("pay_url")
+        )
+        provider_invoice_id = (
+            result.get("uuid")
+            or result.get("invoice_id")
+            or result.get("id")
+        )
+
+    if not isinstance(invoice_url, str) or not invoice_url:
+        raise RuntimeError(f"CryptoCloud response missing payment url: {body}")
+
+    if provider_invoice_id is not None and not isinstance(provider_invoice_id, str):
+        provider_invoice_id = str(provider_invoice_id)
+
+    return invoice_url, provider_invoice_id
+
+
+def _extract_cryptocloud_order_id(payload: dict[str, Any]) -> str | None:
+    candidates = [
+        payload.get("order_id"),
+        payload.get("merchant_order_id"),
+    ]
+    invoice_data = payload.get("invoice")
+    if isinstance(invoice_data, dict):
+        candidates.append(invoice_data.get("order_id"))
+        candidates.append(invoice_data.get("merchant_order_id"))
+
+    for item in candidates:
+        if isinstance(item, str) and item.strip():
+            return item.strip()
+    return None
+
+
+def _extract_cryptocloud_invoice_id(payload: dict[str, Any]) -> str | None:
+    candidates = [
+        payload.get("invoice_id"),
+        payload.get("uuid"),
+        payload.get("id"),
+    ]
+    invoice_data = payload.get("invoice")
+    if isinstance(invoice_data, dict):
+        candidates.extend([
+            invoice_data.get("invoice_id"),
+            invoice_data.get("uuid"),
+            invoice_data.get("id"),
+        ])
+
+    for item in candidates:
+        if isinstance(item, str) and item.strip():
+            return item.strip()
+        if isinstance(item, int):
+            return str(item)
+    return None
+
+
+def _is_cryptocloud_paid_status(payload: dict[str, Any]) -> bool:
+    candidates: list[str] = []
+    for key in ("status", "invoice_status", "payment_status"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            candidates.append(value.strip().lower())
+
+    invoice_data = payload.get("invoice")
+    if isinstance(invoice_data, dict):
+        for key in ("status", "invoice_status", "payment_status"):
+            value = invoice_data.get(key)
+            if isinstance(value, str):
+                candidates.append(value.strip().lower())
+
+    paid_statuses = {"paid", "success", "completed", "succeeded", "overpaid", "partial_paid"}
+    return any(item in paid_statuses for item in candidates)
+
+
+def _verify_cryptocloud_webhook_signature(raw_body: bytes, signature: str | None) -> bool:
+    secret = os.getenv("CRYPTOCLOUD_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        return True
+    if not signature:
+        return False
+
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature.strip().lower())
 
 
 def _bot_token() -> str:
@@ -490,26 +634,51 @@ async def payment_create(request: web.Request) -> web.Response:
             )
 
         if method == "crypto":
-            template = os.getenv("PAYMENT_CRYPTO_URL_TEMPLATE", "").strip()
-            static_url = os.getenv("PAYMENT_CRYPTO_URL", "").strip()
-            if template:
-                payment_url = _build_template_payment_url(template, user_id, plan, method)
-            elif static_url:
-                payment_url = static_url
+            order_id = f"cc-{user_id}-{uuid.uuid4().hex[:10]}"
+            api_token, shop_id = _cryptocloud_credentials()
+            provider_invoice_id: str | None = None
+
+            if api_token and shop_id:
+                try:
+                    payment_url, provider_invoice_id = await _create_cryptocloud_invoice(
+                        user_id=user_id,
+                        plan=plan,
+                        order_id=order_id,
+                    )
+                except Exception as exc:
+                    logging.exception("CryptoCloud invoice creation failed for user_id=%s", user_id)
+                    return web.json_response(
+                        {
+                            "ok": False,
+                            "error": f"CryptoCloud error: {exc}",
+                        },
+                        status=502,
+                    )
             else:
+                # Legacy fallback: direct Tonkeeper transfer link if CryptoCloud is not configured.
                 wallet_address = os.getenv("PAYMENT_CRYPTO_TON_WALLET", "").strip() or DEFAULT_CRYPTO_TON_WALLET
                 amount_ton = float(plan.get("crypto_ton") or 0)
-                order_id = f"crypto-{uuid.uuid4().hex[:10]}"
                 memo_text = f"SkullVPN {plan['code']} uid:{user_id} oid:{order_id}"
                 if not wallet_address or amount_ton <= 0:
                     return web.json_response(
                         {
                             "ok": False,
-                            "error": "Crypto payment URL is not configured",
+                            "error": "Crypto payment is not configured",
                         },
                         status=503,
                     )
                 payment_url = _build_tonkeeper_payment_url(wallet_address, amount_ton, memo_text)
+
+            create_crypto_order(
+                order_id=order_id,
+                user_id=user_id,
+                plan_code=plan["code"],
+                plan_name=plan["name"],
+                days=int(plan["days"]),
+                amount_rub=float(plan["price_rub"]),
+                provider_invoice_id=provider_invoice_id,
+                invoice_url=payment_url,
+            )
 
             return web.json_response(
                 {
@@ -517,6 +686,8 @@ async def payment_create(request: web.Request) -> web.Response:
                     "method": method,
                     "plan": plan,
                     "payment_url": payment_url,
+                    "order_id": order_id,
+                    "provider": "cryptocloud" if api_token and shop_id else "tonkeeper",
                     "wallet_address": os.getenv("PAYMENT_CRYPTO_TON_WALLET", "").strip() or DEFAULT_CRYPTO_TON_WALLET,
                     "network": "TON",
                 }
@@ -531,6 +702,112 @@ async def payment_create(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
 
 
+async def payment_cryptocloud_webhook(request: web.Request) -> web.Response:
+    try:
+        raw_body = await request.read()
+        signature = (
+            request.headers.get("X-Signature")
+            or request.headers.get("X-CC-Signature")
+            or request.headers.get("Signature")
+        )
+        if not _verify_cryptocloud_webhook_signature(raw_body, signature):
+            return web.json_response({"ok": False, "error": "Invalid webhook signature"}, status=401)
+
+        try:
+            payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        except Exception:
+            payload = {}
+
+        if not isinstance(payload, dict):
+            payload = {}
+
+        if not _is_cryptocloud_paid_status(payload):
+            return web.json_response({"ok": True, "ignored": True, "reason": "Payment is not in paid status"})
+
+        order_id = _extract_cryptocloud_order_id(payload)
+        order = get_order_by_id(order_id) if order_id else None
+        if order is None:
+            provider_invoice_id = _extract_cryptocloud_invoice_id(payload)
+            if provider_invoice_id:
+                order = get_order_by_provider_invoice_id(provider_invoice_id)
+
+        if order is None:
+            return web.json_response({"ok": False, "error": "Order not found"}, status=404)
+
+        paid_record, is_first_paid = mark_order_paid(order["order_id"], payload)
+        if paid_record is None:
+            return web.json_response({"ok": False, "error": "Order not found"}, status=404)
+
+        if not is_first_paid:
+            return web.json_response({"ok": True, "duplicate": True})
+
+        user_id = int(paid_record["user_id"])
+        plan_name = str(paid_record["plan_name"])
+        days = int(paid_record["days"])
+        amount_rub = float(paid_record["amount_rub"])
+
+        sub_record = extend_subscription(user_id, days, plan_name=plan_name)
+        expires_at = sub_record.get("expires_at", "-")
+        profile = ensure_wireguard_profile(user_id)
+        profile_id = profile.get("profile_id", "-") if isinstance(profile, dict) else "-"
+        config_name = get_wireguard_config_filename(user_id)
+        config_text = get_wireguard_config_text(user_id)
+        add_peer_to_server(user_id)
+
+        bot: Bot | None = request.app.get("bot")
+        if bot is not None:
+            try:
+                user_chat = await bot.get_chat(user_id)
+                username = getattr(user_chat, "username", None)
+            except Exception:
+                username = None
+
+            buyer_name = f"@{username}" if isinstance(username, str) and username else f"user_{user_id}"
+
+            try:
+                await bot.send_message(
+                    OWNER_ID,
+                    "✅ Успешная покупка подписки (CryptoCloud)\n\n"
+                    f"Тариф: {plan_name}\n"
+                    f"Сумма: {amount_rub:.2f} RUB\n"
+                    f"Покупатель: {buyer_name}\n"
+                    f"Telegram ID: {user_id}\n"
+                    f"ID конфигуратора: {profile_id}\n"
+                    f"Файл конфига: {config_name}\n"
+                    f"Действует до: {expires_at}",
+                )
+            except Exception:
+                logging.exception("Failed to notify owner about CryptoCloud purchase")
+
+            try:
+                await bot.send_message(
+                    user_id,
+                    "✅ Оплата получена\n\n"
+                    f"Тариф: {plan_name}\n"
+                    f"Сумма: {amount_rub:.2f} RUB\n"
+                    f"Доступ продлён на {days} дней\n"
+                    f"ID конфигуратора: {profile_id}\n"
+                    f"Действует до: {expires_at}",
+                )
+            except Exception:
+                logging.exception("Failed to notify user about CryptoCloud purchase user_id=%s", user_id)
+
+            if config_text:
+                try:
+                    await bot.send_document(
+                        user_id,
+                        BufferedInputFile(config_text.encode("utf-8"), filename=config_name),
+                        caption="Профиль WireGuard / AmneziaWG",
+                    )
+                except Exception:
+                    logging.exception("Failed to send config after CryptoCloud purchase user_id=%s", user_id)
+
+        return web.json_response({"ok": True, "order_id": paid_record["order_id"]})
+    except Exception:
+        logging.exception("/api/payment/cryptocloud/webhook unexpected error")
+        return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
+
+
 def create_api_app(bot: Bot) -> web.Application:
     app = web.Application()
     app["bot"] = bot
@@ -539,5 +816,6 @@ def create_api_app(bot: Bot) -> web.Application:
     app.router.add_post("/api/ad/start", ad_start)
     app.router.add_post("/api/ad/complete", ad_complete)
     app.router.add_post("/api/payment/create", payment_create)
+    app.router.add_post("/api/payment/cryptocloud/webhook", payment_cryptocloud_webhook)
     app.router.add_get("/healthz", lambda _request: web.json_response({"ok": True}))
     return app
