@@ -1113,6 +1113,19 @@ async function requestFreeAccess() {
 }
 
 
+function submitFreeAccessRequest(hours = 1) {
+  if (!tg?.sendData) {
+    return false;
+  }
+
+  tg.sendData(JSON.stringify({
+    action: "claim_free_access",
+    hours,
+  }));
+  return true;
+}
+
+
 async function startFreeServerAdFlow(server) {
   if (freeServerAdInProgress) {
     showToast("Реклама уже запущена, дождитесь окончания");
@@ -1150,14 +1163,29 @@ async function startFreeServerAdFlow(server) {
         state.rewardReadyAt = 0;
         saveRewardTimerState();
 
+        const submittedViaChat = submitFreeAccessRequest(1);
+        if (submittedViaChat) {
+          showToast("Реклама просмотрена. Доступ и конфиг отправлены в чат.");
+        }
+
         let accessData = null;
-        try {
-          accessData = await requestFreeAccess();
-        } catch (claimError) {
-          // Sometimes access is already granted even if claim endpoint returns a transient error.
-          await loadUserState();
-          if (!hasFreeAccess()) {
-            throw claimError;
+        if (!submittedViaChat) {
+          try {
+            accessData = await requestFreeAccess();
+          } catch (claimError) {
+            // Sometimes access is already granted even if claim endpoint returns a transient error.
+            await loadUserState();
+            if (!hasFreeAccess()) {
+              throw claimError;
+            }
+          }
+        } else {
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            await loadUserState();
+            if (hasFreeAccess()) {
+              break;
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 700));
           }
         }
 
@@ -1175,7 +1203,9 @@ async function startFreeServerAdFlow(server) {
         renderServerList();
 
         hideAdOverlay();
-        showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час. Мы выслали вам в личные сообщения доступ к SkullVPN.");
+        if (!submittedViaChat) {
+          showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час. Мы выслали вам в личные сообщения доступ к SkullVPN.");
+        }
       } catch (error) {
         const message = error?.message || "Не удалось выдать доступ после рекламы";
         showToast(message);

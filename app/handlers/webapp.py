@@ -59,6 +59,12 @@ async def webapp_data(message: Message) -> None:
     remaining_text = format_free_access_remaining_text(user_id)
     ensure_wireguard_profile(user_id)
 
+    await message.answer(
+        "✅ Реклама просмотрена, доступ выдан на 1 час.\n"
+        "Конфиг и сообщение с данными отправляю ниже в этот чат.",
+        disable_web_page_preview=True,
+    )
+
     if created:
         await message.answer(
             FREE_ACCESS_GRANTED_TEXT_TEMPLATE.format(
