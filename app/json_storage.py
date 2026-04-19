@@ -25,6 +25,7 @@ def _connect() -> sqlite3.Connection:
     connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute("PRAGMA busy_timeout=20000")
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS kv_store (

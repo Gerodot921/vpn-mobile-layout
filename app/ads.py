@@ -182,75 +182,80 @@ def _ensure_seeded() -> None:
     if _seed_checked:
         return
 
-    with _connect() as connection:
-        existing = connection.execute(f"SELECT COUNT(*) FROM {ADS_STATE_TABLE}").fetchone()
-        if existing and int(existing[0]) > 0:
-            _seed_checked = True
-            return
+    def _seed() -> None:
+        global _seed_checked
+        with _connect() as connection:
+            existing = connection.execute(f"SELECT COUNT(*) FROM {ADS_STATE_TABLE}").fetchone()
+            if existing and int(existing[0]) > 0:
+                _seed_checked = True
+                return
 
-        raw_data = load_json_file(ADS_STORAGE_PATH, {})
-        active_ad = _default_ad()
-        impressions = 0
-        completions = 0
-        clicks = 0
+            raw_data = load_json_file(ADS_STORAGE_PATH, {})
+            active_ad = _default_ad()
+            impressions = 0
+            completions = 0
+            clicks = 0
 
-        if isinstance(raw_data, dict):
-            deserialized = _deserialize_ad(raw_data.get("active_ad"))
-            if deserialized is not None:
-                active_ad = deserialized
-            impressions_value = raw_data.get("impressions", 0)
-            completions_value = raw_data.get("completions", 0)
-            clicks_value = raw_data.get("clicks", 0)
-            if isinstance(impressions_value, int) and impressions_value >= 0:
-                impressions = impressions_value
-            if isinstance(completions_value, int) and completions_value >= 0:
-                completions = completions_value
-            if isinstance(clicks_value, int) and clicks_value >= 0:
-                clicks = clicks_value
+            if isinstance(raw_data, dict):
+                deserialized = _deserialize_ad(raw_data.get("active_ad"))
+                if deserialized is not None:
+                    active_ad = deserialized
+                impressions_value = raw_data.get("impressions", 0)
+                completions_value = raw_data.get("completions", 0)
+                clicks_value = raw_data.get("clicks", 0)
+                if isinstance(impressions_value, int) and impressions_value >= 0:
+                    impressions = impressions_value
+                if isinstance(completions_value, int) and completions_value >= 0:
+                    completions = completions_value
+                if isinstance(clicks_value, int) and clicks_value >= 0:
+                    clicks = clicks_value
 
-        connection.execute(
-            f"INSERT OR REPLACE INTO {ADS_STATE_TABLE} (id, active_ad_json, impressions, completions, clicks) VALUES (1, ?, ?, ?, ?)",
-            (_serialize_ad(active_ad), impressions, completions, clicks),
-        )
+            connection.execute(
+                f"INSERT OR REPLACE INTO {ADS_STATE_TABLE} (id, active_ad_json, impressions, completions, clicks) VALUES (1, ?, ?, ?, ?)",
+                (_serialize_ad(active_ad), impressions, completions, clicks),
+            )
 
-        raw_sessions = load_json_file(AD_SESSIONS_STORAGE_PATH, {})
-        if isinstance(raw_sessions, dict):
-            for token, value in raw_sessions.items():
-                if not isinstance(token, str) or not isinstance(value, dict):
-                    continue
-                user_id = value.get("user_id")
-                ad_id = value.get("ad_id")
-                started_at = value.get("started_at")
-                expires_at = value.get("expires_at")
-                completed = value.get("completed", False)
-                clicked = value.get("clicked", False)
-                required_seconds = value.get("required_seconds", _default_ad()["duration_sec"])
-                if not isinstance(user_id, int) or not all(isinstance(item, str) for item in [ad_id, started_at, expires_at]):
-                    continue
-                try:
-                    required_seconds_value = int(required_seconds)
-                except Exception:
-                    required_seconds_value = _default_ad()["duration_sec"]
-                required_seconds_value = min(max(required_seconds_value, 5), 300)
-                connection.execute(
-                    f"""
-                    INSERT OR REPLACE INTO {AD_SESSIONS_TABLE}
-                    (session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        token,
-                        user_id,
-                        ad_id,
-                        started_at,
-                        expires_at,
-                        required_seconds_value,
-                        1 if bool(completed) else 0,
-                        1 if bool(clicked) else 0,
-                    ),
-                )
+            raw_sessions = load_json_file(AD_SESSIONS_STORAGE_PATH, {})
+            if isinstance(raw_sessions, dict):
+                for token, value in raw_sessions.items():
+                    if not isinstance(token, str) or not isinstance(value, dict):
+                        continue
+                    user_id = value.get("user_id")
+                    ad_id = value.get("ad_id")
+                    started_at = value.get("started_at")
+                    expires_at = value.get("expires_at")
+                    completed = value.get("completed", False)
+                    clicked = value.get("clicked", False)
+                    required_seconds = value.get("required_seconds", _default_ad()["duration_sec"])
+                    if not isinstance(user_id, int) or not all(isinstance(item, str) for item in [ad_id, started_at, expires_at]):
+                        continue
+                    try:
+                        required_seconds_value = int(required_seconds)
+                    except Exception:
+                        required_seconds_value = _default_ad()["duration_sec"]
+                    required_seconds_value = min(max(required_seconds_value, 5), 300)
+                    connection.execute(
+                        f"""
+                        INSERT OR REPLACE INTO {AD_SESSIONS_TABLE}
+                        (session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            token,
+                            user_id,
+                            ad_id,
+                            started_at,
+                            expires_at,
+                            required_seconds_value,
+                            1 if bool(completed) else 0,
+                            1 if bool(clicked) else 0,
+                        ),
+                    )
 
-        connection.commit()
+            connection.commit()
+        _seed_checked = True
+
+    _with_db_lock_retry(_seed)
     _seed_checked = True
 
 
@@ -278,10 +283,13 @@ def _default_ad() -> Ad:
 
 def _load_ad_state() -> AdState:
     _ensure_seeded()
-    with _connect() as connection:
-        row = connection.execute(
-            f"SELECT active_ad_json, impressions, completions, clicks FROM {ADS_STATE_TABLE} WHERE id = 1"
-        ).fetchone()
+    def _read_row() -> Any:
+        with _connect() as connection:
+            return connection.execute(
+                f"SELECT active_ad_json, impressions, completions, clicks FROM {ADS_STATE_TABLE} WHERE id = 1"
+            ).fetchone()
+
+    row = _with_db_lock_retry(_read_row)
 
     active_ad = _default_ad()
     impressions = 0
@@ -330,10 +338,14 @@ def _save_ad_state(state: AdState) -> None:
 def _load_sessions() -> dict[str, AdSession]:
     _ensure_seeded()
     sessions: dict[str, AdSession] = {}
-    with _connect() as connection:
-        rows = connection.execute(
-            f"SELECT session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked FROM {AD_SESSIONS_TABLE}"
-        ).fetchall()
+
+    def _read_rows() -> Any:
+        with _connect() as connection:
+            return connection.execute(
+                f"SELECT session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked FROM {AD_SESSIONS_TABLE}"
+            ).fetchall()
+
+    rows = _with_db_lock_retry(_read_rows)
 
     for row in rows:
         try:
@@ -557,15 +569,18 @@ def set_active_ad(
         safe_duration = min(max(int(duration_sec), 5), 300)
 
     with _state_lock:
-        state = _load_ad_state()
-        ad = state["active_ad"]
+        def _update() -> Ad:
+            state = _load_ad_state()
+            ad = state["active_ad"]
 
-        ad["asset_url"] = cleaned_asset
-        ad["click_url"] = (click_url or cleaned_asset).strip() or cleaned_asset
-        ad["title"] = (title or ad.get("title") or "Рекламное предложение").strip() or "Рекламное предложение"
-        ad["duration_sec"] = safe_duration
-        ad["active"] = True
+            ad["asset_url"] = cleaned_asset
+            ad["click_url"] = (click_url or cleaned_asset).strip() or cleaned_asset
+            ad["title"] = (title or ad.get("title") or "Рекламное предложение").strip() or "Рекламное предложение"
+            ad["duration_sec"] = safe_duration
+            ad["active"] = True
 
-        state["active_ad"] = ad
-        _save_ad_state(state)
-        return ad
+            state["active_ad"] = ad
+            _save_ad_state(state)
+            return ad
+
+        return _with_db_lock_retry(_update)
