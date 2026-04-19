@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from app.api import create_api_app
 from app.free_access import free_access_cleanup_loop, free_access_reminder_loop
-from app.handlers import callbacks_router, commands_router, menu_router, start_router, webapp_router
+from app.handlers import callbacks_router, commands_router, menu_router, payments_router, start_router, webapp_router
 from app.subscriptions import reminder_loop
 
 
@@ -19,6 +19,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(commands_router)
     dp.include_router(menu_router)
     dp.include_router(callbacks_router)
+    dp.include_router(payments_router)
     dp.include_router(webapp_router)
     return dp
 

@@ -136,8 +136,9 @@ def ensure_subscription(user_id: int, initial_days: int = DEFAULT_SUBSCRIPTION_D
         return state[user_key]
 
 
-def extend_subscription(user_id: int, days: int) -> SubscriptionRecord:
+def extend_subscription(user_id: int, days: int, plan_name: str | None = None) -> SubscriptionRecord:
     user_key = str(user_id)
+    requested_plan_name = plan_name
     with _state_lock:
         state = _load_state()
         current = state.get(user_key)
@@ -145,11 +146,17 @@ def extend_subscription(user_id: int, days: int) -> SubscriptionRecord:
         if current is None:
             base_expires_at = now
             reminders_sent: list[int] = []
-            plan_name = "Базовый"
+            current_plan_name = "Базовый"
         else:
             base_expires_at = _parse_expires_at(current["expires_at"])
             reminders_sent = current.get("reminders_sent", [])
-            plan_name = current.get("plan_name", "Базовый")
+            current_plan_name = current.get("plan_name", "Базовый")
+
+        resolved_plan_name = (
+            current_plan_name if isinstance(current_plan_name, str) and current_plan_name else "Базовый"
+        )
+        if isinstance(requested_plan_name, str) and requested_plan_name.strip():
+            resolved_plan_name = requested_plan_name.strip()
 
         if base_expires_at < now:
             base_expires_at = now
@@ -157,10 +164,27 @@ def extend_subscription(user_id: int, days: int) -> SubscriptionRecord:
         state[user_key] = {
             "expires_at": (base_expires_at + timedelta(days=days)).isoformat(),
             "reminders_sent": reminders_sent,
-            "plan_name": plan_name,
+            "plan_name": resolved_plan_name,
         }
         _save_state(state)
         return state[user_key]
+
+
+def set_subscription_plan_name(user_id: int, plan_name: str) -> SubscriptionRecord | None:
+    if not isinstance(plan_name, str) or not plan_name.strip():
+        return None
+
+    user_key = str(user_id)
+    with _state_lock:
+        state = _load_state()
+        record = state.get(user_key)
+        if record is None:
+            return None
+
+        record["plan_name"] = plan_name.strip()
+        state[user_key] = record
+        _save_state(state)
+        return record
 
 
 def delete_subscription(user_id: int) -> SubscriptionRecord | None:

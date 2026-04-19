@@ -510,6 +510,42 @@ body {
   text-align: center;
 }
 
+.payment-methods {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.payment-method-btn {
+  border: 1px solid rgba(36, 165, 255, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(11, 35, 58, 0.92), rgba(8, 23, 40, 0.96));
+  color: #dcecff;
+  padding: 9px 8px;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.payment-method-btn.active {
+  border-color: rgba(0, 211, 167, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 211, 167, 0.35) inset;
+  background: linear-gradient(180deg, rgba(8, 56, 78, 0.98), rgba(5, 42, 61, 0.98));
+}
+
+.payment-method-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.payment-method-meta {
+  font-size: 10px;
+  color: #9fc6ee;
+}
+
 .hidden {
   display: none;
 }
@@ -958,6 +994,10 @@ body {
 
 @media (max-width: 520px) {
   .instruction-app-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-methods {
     grid-template-columns: 1fr;
   }
 

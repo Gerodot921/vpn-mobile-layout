@@ -27,6 +27,8 @@ const copyRefBtn = document.getElementById("copyRefBtn");
 const timeLeftValue = document.getElementById("timeLeftValue");
 const tariffList = document.getElementById("tariffList");
 const selectedTariffHint = document.getElementById("selectedTariffHint");
+const paymentMethods = document.getElementById("paymentMethods");
+const paymentStatusHint = document.getElementById("paymentStatusHint");
 const subscriptionBtn = document.getElementById("subscriptionBtn");
 const changeServerBtn = document.getElementById("changeServerBtn");
 const autoServerBtn = document.getElementById("autoServerBtn");
@@ -74,6 +76,24 @@ const REWARD_AD_URL = "";
 const REWARD_WATCH_SECONDS = 30;
 const REWARD_READY_STORAGE_KEY = "skull_vpn_reward_ready_at_v1";
 const ONBOARDING_KEY = "skull_vpn_onboarding_seen_v2";
+
+const PAYMENT_METHODS = [
+  {
+    code: "telegram_stars",
+    title: "⭐ Stars",
+    meta: "Telegram",
+  },
+  {
+    code: "sbp",
+    title: "СБП",
+    meta: "Банковский перевод",
+  },
+  {
+    code: "crypto",
+    title: "Crypto",
+    meta: "USDT / TON",
+  },
+];
 
 const INSTRUCTION_APPS = {
   amneziavpn: "AmneziaVPN",
@@ -208,6 +228,9 @@ const state = {
   adSessionToken: null,
   adWatchSeconds: REWARD_WATCH_SECONDS,
   adAssetUrl: "",
+  paidRemainingText: "неизвестно",
+  paidExpiresAt: null,
+  paymentMethod: "telegram_stars",
   instruction: {
     platform: "windows",
     app: "amneziavpn",
@@ -220,29 +243,37 @@ let adCountdownTimer = null;
 
 const tariffPlans = [
   {
+    code: "basic",
     name: "Базовый",
     priceRub: 50,
+    durationDays: 30,
     duration: "1 месяц",
     keys: "1 ключ на 1 устройство",
     note: "Для личного использования",
   },
   {
+    code: "standard",
     name: "Стандарт",
     priceRub: 129,
+    durationDays: 30,
     duration: "1 месяц",
     keys: "3 ключа на 3 устройства",
     note: "Телефон, планшет и ноутбук",
   },
   {
+    code: "family",
     name: "Семейный",
     priceRub: 299,
+    durationDays: 90,
     duration: "3 месяца",
     keys: "5 ключей на 5 устройств",
     note: "Оптимально для семьи",
   },
   {
+    code: "premium",
     name: "Премиум",
     priceRub: 999,
+    durationDays: 365,
     duration: "12 месяцев",
     keys: "10 ключей на 10 устройств",
     note: "Максимальная выгода",
@@ -701,17 +732,107 @@ function renderByMode() {
 }
 
 function syncSubscription() {
-  if (state.accessHours > 0) {
-    timeLeftValue.textContent = `⏳ Подписка: ${state.accessHours} часа`;
+  if (state.hasSubscription) {
+    timeLeftValue.textContent = `⏳ Подписка: ${state.paidRemainingText || "активна"}`;
   } else {
     timeLeftValue.textContent = "⏳ Подписка не активна";
   }
-  state.hasSubscription = state.accessHours > 0;
-  if (state.accessHours > 0 && state.accessHours < 12) {
+
+  let hoursLeft = Number.POSITIVE_INFINITY;
+  if (state.hasSubscription && state.paidExpiresAt) {
+    const expiresAtTs = Date.parse(state.paidExpiresAt);
+    if (Number.isFinite(expiresAtTs)) {
+      hoursLeft = (expiresAtTs - Date.now()) / (1000 * 60 * 60);
+    }
+  }
+
+  if (state.hasSubscription && hoursLeft < 12) {
     timeWarning.classList.remove("hidden");
   } else {
     timeWarning.classList.add("hidden");
   }
+}
+
+
+function selectedPaymentMethod() {
+  return PAYMENT_METHODS.find((item) => item.code === state.paymentMethod) || PAYMENT_METHODS[0];
+}
+
+
+function renderPaymentMethods() {
+  if (!paymentMethods) {
+    return;
+  }
+
+  paymentMethods.innerHTML = "";
+  PAYMENT_METHODS.forEach((method) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "payment-method-btn";
+    if (method.code === state.paymentMethod) {
+      button.classList.add("active");
+    }
+
+    button.innerHTML = `
+      <span class="payment-method-title">${method.title}</span>
+      <span class="payment-method-meta">${method.meta}</span>
+    `;
+
+    button.addEventListener("click", () => {
+      state.paymentMethod = method.code;
+      renderPaymentMethods();
+      renderTariffList();
+      if (paymentStatusHint) {
+        paymentStatusHint.textContent = `Способ оплаты: ${method.title}`;
+      }
+    });
+
+    paymentMethods.appendChild(button);
+  });
+
+  if (paymentStatusHint) {
+    paymentStatusHint.textContent = `Способ оплаты: ${selectedPaymentMethod().title}`;
+  }
+}
+
+
+async function requestPayment(planCode, method) {
+  if (!tg?.initData) {
+    throw new Error("Откройте Mini App внутри Telegram");
+  }
+
+  const response = await fetch("/api/payment/create", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      initData: tg.initData,
+      planCode,
+      method,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "Не удалось создать платёж");
+  }
+
+  return data;
+}
+
+
+function openExternalLink(url) {
+  if (!url) {
+    return;
+  }
+
+  if (tg?.openLink) {
+    tg.openLink(url);
+    return;
+  }
+
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 
@@ -1035,6 +1156,8 @@ function applyUserState(payload) {
 
   const paidSubscription = payload.paid_subscription || {};
   state.hasSubscription = Boolean(paidSubscription.active);
+  state.paidRemainingText = String(paidSubscription.remaining_text || "неизвестно");
+  state.paidExpiresAt = paidSubscription.expires_at || null;
 
   const accessInfo = payload.access_info || {};
   state.accessInfo = {
@@ -1046,6 +1169,7 @@ function applyUserState(payload) {
   };
 
   updateReferralStats();
+  syncSubscription();
   syncFreeAccessPanel();
   if (state.instruction.stage === "guide" && !onboarding.classList.contains("hidden")) {
     renderInstructionGuide();
@@ -1110,15 +1234,15 @@ function renderTariffList() {
     item.addEventListener("click", () => {
       state.tariffIndex = index;
       renderTariffList();
-      const selected = currentTariff();
-      selectedTariffHint.textContent = `Выбран тариф: ${selected.name} (${selected.priceRub} ₽)`;
     });
 
     tariffList.appendChild(item);
   });
 
   const selected = currentTariff();
-  selectedTariffHint.textContent = `Выбран тариф: ${selected.name} (${selected.priceRub} ₽)`;
+  const method = selectedPaymentMethod();
+  selectedTariffHint.textContent = `Выбран тариф: ${selected.name} (${selected.priceRub} ₽) • ${method.title}`;
+  subscriptionBtn.textContent = `💳 Оплатить: ${method.title}`;
 }
 
 async function getPublicIpInfo() {
@@ -1286,9 +1410,68 @@ freeAccessValue.addEventListener("click", async () => {
   }
 });
 
-subscriptionBtn.addEventListener("click", () => {
+subscriptionBtn.addEventListener("click", async () => {
   const selected = currentTariff();
-  showToast(`Оплата: ${selected.name} • ${selected.priceRub} ₽ • ${selected.duration}`);
+  const method = selectedPaymentMethod();
+
+  subscriptionBtn.disabled = true;
+  if (paymentStatusHint) {
+    paymentStatusHint.textContent = "Создаём платёж...";
+  }
+
+  try {
+    const paymentData = await requestPayment(selected.code, method.code);
+
+    if (method.code === "telegram_stars") {
+      const invoiceUrl = paymentData?.invoice_url || "";
+      if (!invoiceUrl) {
+        throw new Error("Не удалось получить ссылку на Telegram Stars");
+      }
+
+      if (tg?.openInvoice) {
+        tg.openInvoice(invoiceUrl, async (status) => {
+          if (status === "paid") {
+            showToast("Оплата прошла успешно, обновляем подписку...");
+            await loadUserState();
+            return;
+          }
+          if (status === "cancelled") {
+            showToast("Оплата отменена");
+            return;
+          }
+          if (status === "failed") {
+            showToast("Платёж не прошёл");
+          }
+        });
+      } else {
+        openExternalLink(invoiceUrl);
+      }
+
+      if (paymentStatusHint) {
+        paymentStatusHint.textContent = "Откройте счёт Telegram Stars и завершите оплату.";
+      }
+      return;
+    }
+
+    const paymentUrl = paymentData?.payment_url || "";
+    if (!paymentUrl) {
+      throw new Error("Платёжная ссылка не получена");
+    }
+
+    openExternalLink(paymentUrl);
+    if (paymentStatusHint) {
+      paymentStatusHint.textContent = `Открыта страница оплаты: ${method.title}`;
+    }
+    showToast(`Переход к оплате: ${method.title}`);
+  } catch (error) {
+    const message = error?.message || "Не удалось запустить оплату";
+    if (paymentStatusHint) {
+      paymentStatusHint.textContent = message;
+    }
+    showToast(message);
+  } finally {
+    subscriptionBtn.disabled = false;
+  }
 });
 
 changeServerBtn.addEventListener("click", () => {
@@ -1430,6 +1613,7 @@ updateServerView();
 renderServerList();
 syncSubscription();
 syncFreeAccessPanel();
+renderPaymentMethods();
 renderTariffList();
 renderByMode();
 showOnboardingIfNeeded();

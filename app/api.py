@@ -5,13 +5,14 @@ import hmac
 import json
 import logging
 import os
+import uuid
 from typing import Any
 from urllib.parse import parse_qsl
 
 from aiohttp import web
 
 from aiogram import Bot
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, LabeledPrice
 
 from app.ads import complete_ad_session, start_ad_session
 from app.free_access import (
@@ -28,6 +29,54 @@ from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get
 from app.wireguard import ensure_wireguard_profile
 from app.subscriptions import get_remaining_text, get_subscription_plan_name, get_subscription_record, is_subscription_active
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
+
+
+PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
+    "basic": {
+        "code": "basic",
+        "name": "Базовый",
+        "price_rub": 50,
+        "days": 30,
+        "stars": 90,
+    },
+    "standard": {
+        "code": "standard",
+        "name": "Стандарт",
+        "price_rub": 129,
+        "days": 30,
+        "stars": 225,
+    },
+    "family": {
+        "code": "family",
+        "name": "Семейный",
+        "price_rub": 299,
+        "days": 90,
+        "stars": 525,
+    },
+    "premium": {
+        "code": "premium",
+        "name": "Премиум",
+        "price_rub": 999,
+        "days": 365,
+        "stars": 1750,
+    },
+}
+
+
+def _resolve_payment_plan(plan_code: str) -> dict[str, Any] | None:
+    return PAYMENT_PLAN_CATALOG.get(plan_code)
+
+
+def _build_template_payment_url(template: str, user_id: int, plan: dict[str, Any], method: str) -> str:
+    order_id = f"{method}-{uuid.uuid4().hex[:10]}"
+    return template.format(
+        order_id=order_id,
+        user_id=user_id,
+        plan_code=plan["code"],
+        plan_name=plan["name"],
+        amount_rub=plan["price_rub"],
+        days=plan["days"],
+    )
 
 
 def _bot_token() -> str:
@@ -360,6 +409,101 @@ async def ad_complete(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
 
 
+async def payment_create(request: web.Request) -> web.Response:
+    try:
+        payload = await _read_request_json(request)
+        init_data = _init_data_from_payload(payload)
+        user_data = _extract_user(init_data)
+        user_id = int(user_data["id"])
+
+        method = str(payload.get("method", "")).strip().lower()
+        plan_code = str(payload.get("planCode", "")).strip().lower()
+        plan = _resolve_payment_plan(plan_code)
+        if plan is None:
+            return web.json_response({"ok": False, "error": "Unknown tariff plan"}, status=400)
+
+        if method == "telegram_stars":
+            bot: Bot | None = request.app.get("bot")
+            if bot is None:
+                return web.json_response({"ok": False, "error": "Bot is not available"}, status=500)
+
+            payload_token = f"stars:{plan['code']}:{user_id}:{plan['days']}"
+            invoice_link = await bot.create_invoice_link(
+                title=f"SkullVPN: {plan['name']}",
+                description=f"Доступ к VPN на {plan['days']} дней",
+                payload=payload_token,
+                currency="XTR",
+                prices=[LabeledPrice(label=plan["name"], amount=int(plan["stars"]))],
+            )
+
+            return web.json_response(
+                {
+                    "ok": True,
+                    "method": method,
+                    "plan": plan,
+                    "invoice_url": invoice_link,
+                }
+            )
+
+        if method == "sbp":
+            template = os.getenv("PAYMENT_SBP_URL_TEMPLATE", "").strip()
+            static_url = os.getenv("PAYMENT_SBP_URL", "").strip()
+            if template:
+                payment_url = _build_template_payment_url(template, user_id, plan, method)
+            elif static_url:
+                payment_url = static_url
+            else:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "SBP payment URL is not configured",
+                    },
+                    status=503,
+                )
+
+            return web.json_response(
+                {
+                    "ok": True,
+                    "method": method,
+                    "plan": plan,
+                    "payment_url": payment_url,
+                }
+            )
+
+        if method == "crypto":
+            template = os.getenv("PAYMENT_CRYPTO_URL_TEMPLATE", "").strip()
+            static_url = os.getenv("PAYMENT_CRYPTO_URL", "").strip()
+            if template:
+                payment_url = _build_template_payment_url(template, user_id, plan, method)
+            elif static_url:
+                payment_url = static_url
+            else:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "Crypto payment URL is not configured",
+                    },
+                    status=503,
+                )
+
+            return web.json_response(
+                {
+                    "ok": True,
+                    "method": method,
+                    "plan": plan,
+                    "payment_url": payment_url,
+                }
+            )
+
+        return web.json_response({"ok": False, "error": "Unsupported payment method"}, status=400)
+    except web.HTTPException as exc:
+        logging.warning("/api/payment/create failed: %s", exc.text)
+        return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
+    except Exception:
+        logging.exception("/api/payment/create unexpected error")
+        return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
+
+
 def create_api_app(bot: Bot) -> web.Application:
     app = web.Application()
     app["bot"] = bot
@@ -367,5 +511,6 @@ def create_api_app(bot: Bot) -> web.Application:
     app.router.add_post("/api/claim-free-access", claim_free_access)
     app.router.add_post("/api/ad/start", ad_start)
     app.router.add_post("/api/ad/complete", ad_complete)
+    app.router.add_post("/api/payment/create", payment_create)
     app.router.add_get("/healthz", lambda _request: web.json_response({"ok": True}))
     return app
