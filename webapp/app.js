@@ -1150,13 +1150,25 @@ async function startFreeServerAdFlow(server) {
         state.rewardReadyAt = 0;
         saveRewardTimerState();
 
-        const accessData = await requestFreeAccess();
+        let accessData = null;
+        try {
+          accessData = await requestFreeAccess();
+        } catch (claimError) {
+          // Sometimes access is already granted even if claim endpoint returns a transient error.
+          await loadUserState();
+          if (!hasFreeAccess()) {
+            throw claimError;
+          }
+        }
+
         state.adSessionToken = null;
         state.adSessionStartedAtMs = 0;
         state.adWatchSeconds = REWARD_WATCH_SECONDS;
         state.adAssetUrl = "";
         state.adClickUrl = "";
-        applyUserState(accessData);
+        if (accessData) {
+          applyUserState(accessData);
+        }
 
         state.serverIndex = serverConfigs.indexOf(server);
         updateServerView();

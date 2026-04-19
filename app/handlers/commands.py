@@ -712,7 +712,9 @@ async def ad_stats_command(message: Message) -> None:
     stats = get_ad_stats()
     impressions = int(stats.get("impressions", 0) or 0)
     completions = int(stats.get("completions", 0) or 0)
+    clicks = int(stats.get("clicks", 0) or 0)
     conversion = (completions / impressions * 100.0) if impressions > 0 else 0.0
+    ctr = (clicks / impressions * 100.0) if impressions > 0 else 0.0
     ad = stats.get("active_ad") or {}
 
     lines = [
@@ -721,6 +723,8 @@ async def ad_stats_command(message: Message) -> None:
         f"Показы (sessions): {impressions}",
         f"Досмотры: {completions}",
         f"Конверсия: {conversion:.1f}%",
+        f"Клики: {clicks}",
+        f"CTR: {ctr:.1f}%",
         "",
         f"Активна: {bool(ad.get('active'))}",
         f"asset: {ad.get('asset_url', '-')}",

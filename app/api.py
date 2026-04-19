@@ -479,6 +479,10 @@ async def claim_free_access(request: web.Request) -> web.Response:
             record, created = grant_free_access(user_id, DEFAULT_FREE_ACCESS_HOURS, source="mini_app_ad", force_extend=False)
             action_label = "mini_app_ad"
 
+        if record is None:
+            logging.error("/api/claim-free-access produced empty record for user_id=%s", user_id)
+            return web.json_response({"ok": False, "error": "Unable to provision free access"}, status=500)
+
         # Ensure peer is added to server only once per free access slot
         peer_added = record.get("peer_added_to_server", False) if record else False
         if not peer_added and record:
@@ -488,8 +492,53 @@ async def claim_free_access(request: web.Request) -> web.Response:
             else:
                 logging.warning("Peer attach was skipped/failed for user_id=%s", user_id)
 
-        response_payload = _build_state_payload(user_data)
-        await _enrich_referral_invites_with_usernames(response_payload, request.app.get("bot"))
+        response_payload: dict[str, Any]
+        try:
+            response_payload = _build_state_payload(user_data)
+            await _enrich_referral_invites_with_usernames(response_payload, request.app.get("bot"))
+        except Exception:
+            logging.exception("Failed to build full state payload in /api/claim-free-access for user_id=%s", user_id)
+            response_payload = {
+                "ok": True,
+                "user": {
+                    "id": user_id,
+                    "username": user_data.get("username"),
+                    "first_name": user_data.get("first_name"),
+                    "last_name": user_data.get("last_name"),
+                },
+                "referral": {
+                    "referrer_id": None,
+                    "invited_count": 0,
+                    "bonus_days": 0,
+                    "activated": False,
+                    "invites": [],
+                },
+                "free_access": {
+                    "active": True,
+                    "access_key": record.get("access_key"),
+                    "expires_at": record.get("expires_at"),
+                    "remaining_text": format_free_access_remaining_text(user_id),
+                    "source": record.get("source"),
+                    "vpn_protocol": record.get("vpn_protocol"),
+                    "vpn_profile_name": record.get("vpn_profile_name"),
+                    "vpn_config_name": record.get("vpn_config_name"),
+                    "vpn_configured": bool(record.get("vpn_configured", False)),
+                },
+                "paid_subscription": {
+                    "plan_name": "none",
+                    "remaining_text": "0",
+                    "expires_at": None,
+                    "active": False,
+                },
+                "access_info": {
+                    "tier": "free",
+                    "key_title": "Бесплатный",
+                    "key_value": record.get("access_key"),
+                    "config_name": record.get("vpn_config_name"),
+                    "expires_at": record.get("expires_at"),
+                },
+            }
+
         response_payload["claim"] = {
             "created": created,
             "action": action_label,
