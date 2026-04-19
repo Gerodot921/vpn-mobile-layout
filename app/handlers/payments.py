@@ -1,11 +1,15 @@
 import logging
+import os
 
 from aiogram import F, Router
-from aiogram.types import Message, PreCheckoutQuery
+from aiogram.types import BufferedInputFile, Message, PreCheckoutQuery
 
 from app.subscriptions import extend_subscription
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile
 
 router = Router()
+
+OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
 
 
 def _parse_stars_payload(payload: str) -> tuple[str, int, int] | None:
@@ -64,10 +68,47 @@ async def on_successful_payment(message: Message) -> None:
     plan_name = plan_name_by_code.get(plan_code, "Базовый")
     record = extend_subscription(user.id, days, plan_name=plan_name)
     expires_at = record.get("expires_at", "-")
+    profile = ensure_wireguard_profile(user.id)
+    profile_id = profile.get("profile_id", "-")
+    config_filename = get_wireguard_config_filename(user.id)
+    config_text = get_wireguard_config_text(user.id)
+
+    if profile is not None:
+        add_peer_to_server(user.id)
+
+    username = f"@{user.username}" if user.username else f"user_{user.id}"
+    amount_text = f"{payment.total_amount} {payment.currency}"
+    admin_message = (
+        "✅ Успешная покупка подписки\n\n"
+        f"Тариф: {plan_name}\n"
+        f"Сумма: {amount_text}\n"
+        f"Покупатель: {username}\n"
+        f"Telegram ID: {user.id}\n"
+        f"ID конфигуратора: {profile_id}\n"
+        f"Файл конфига: {config_filename}\n"
+        f"Действует до: {expires_at}"
+    )
+
+    try:
+        await message.bot.send_message(OWNER_ID, admin_message)
+    except Exception:
+        logging.exception("Failed to notify owner about successful subscription purchase")
 
     await message.answer(
         "✅ Оплата получена\n\n"
         f"Тариф: {plan_name}\n"
+        f"Сумма: {amount_text}\n"
         f"Доступ продлён на {days} дней\n"
+        f"ID конфигуратора: {profile_id}\n"
         f"Действует до: {expires_at}"
     )
+
+    if config_text:
+        try:
+            await message.bot.send_document(
+                user.id,
+                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                caption="Профиль WireGuard / AmneziaWG",
+            )
+        except Exception:
+            logging.exception("Failed to send paid subscription config to user_id=%s", user.id)
