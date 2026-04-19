@@ -31,6 +31,7 @@ from app.free_access import (
 )
 from app.referrals import ensure_user, get_referral_invites, upsert_username
 from app.personal_configs import get_active_personal_config_for_user
+from app.payment_webhooks import log_payment_webhook_event
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.wireguard import ensure_wireguard_profile
 from app.subscriptions import get_remaining_text, get_subscription_plan_name, get_subscription_record, is_subscription_active
@@ -723,6 +724,8 @@ async def payment_create(request: web.Request) -> web.Response:
 
 
 async def payment_cryptocloud_webhook(request: web.Request) -> web.Response:
+    provider = "cryptocloud"
+    event_type = "invoice_webhook"
     try:
         raw_body = await request.read()
         signature = (
@@ -731,6 +734,13 @@ async def payment_cryptocloud_webhook(request: web.Request) -> web.Response:
             or request.headers.get("Signature")
         )
         if not _verify_cryptocloud_webhook_signature(raw_body, signature):
+            log_payment_webhook_event(
+                provider=provider,
+                event_type=event_type,
+                status="rejected",
+                http_status=401,
+                message="Invalid webhook signature",
+            )
             return web.json_response({"ok": False, "error": "Invalid webhook signature"}, status=401)
 
         try:
@@ -741,24 +751,65 @@ async def payment_cryptocloud_webhook(request: web.Request) -> web.Response:
         if not isinstance(payload, dict):
             payload = {}
 
+        order_id = _extract_cryptocloud_order_id(payload)
+        provider_invoice_id = _extract_cryptocloud_invoice_id(payload)
+
         if not _is_cryptocloud_paid_status(payload):
+            log_payment_webhook_event(
+                provider=provider,
+                event_type=event_type,
+                status="ignored",
+                http_status=200,
+                message="Payment is not in paid status",
+                order_id=order_id,
+                provider_invoice_id=provider_invoice_id,
+                payload=payload,
+            )
             return web.json_response({"ok": True, "ignored": True, "reason": "Payment is not in paid status"})
 
-        order_id = _extract_cryptocloud_order_id(payload)
         order = get_order_by_id(order_id) if order_id else None
         if order is None:
-            provider_invoice_id = _extract_cryptocloud_invoice_id(payload)
             if provider_invoice_id:
                 order = get_order_by_provider_invoice_id(provider_invoice_id)
 
         if order is None:
+            log_payment_webhook_event(
+                provider=provider,
+                event_type=event_type,
+                status="rejected",
+                http_status=404,
+                message="Order not found",
+                order_id=order_id,
+                provider_invoice_id=provider_invoice_id,
+                payload=payload,
+            )
             return web.json_response({"ok": False, "error": "Order not found"}, status=404)
 
         paid_record, is_first_paid = mark_order_paid(order["order_id"], payload)
         if paid_record is None:
+            log_payment_webhook_event(
+                provider=provider,
+                event_type=event_type,
+                status="rejected",
+                http_status=404,
+                message="Order not found during mark_paid",
+                order_id=order.get("order_id") if isinstance(order, dict) else order_id,
+                provider_invoice_id=provider_invoice_id,
+                payload=payload,
+            )
             return web.json_response({"ok": False, "error": "Order not found"}, status=404)
 
         if not is_first_paid:
+            log_payment_webhook_event(
+                provider=provider,
+                event_type=event_type,
+                status="duplicate",
+                http_status=200,
+                message="Duplicate webhook for already paid order",
+                order_id=str(paid_record.get("order_id") or order_id or ""),
+                provider_invoice_id=provider_invoice_id,
+                payload=payload,
+            )
             return web.json_response({"ok": True, "duplicate": True})
 
         user_id = int(paid_record["user_id"])
@@ -822,9 +873,26 @@ async def payment_cryptocloud_webhook(request: web.Request) -> web.Response:
                 except Exception:
                     logging.exception("Failed to send config after CryptoCloud purchase user_id=%s", user_id)
 
+        log_payment_webhook_event(
+            provider=provider,
+            event_type=event_type,
+            status="processed",
+            http_status=200,
+            message="Payment processed successfully",
+            order_id=str(paid_record.get("order_id") or order_id or ""),
+            provider_invoice_id=provider_invoice_id,
+            payload=payload,
+        )
         return web.json_response({"ok": True, "order_id": paid_record["order_id"]})
     except Exception:
         logging.exception("/api/payment/cryptocloud/webhook unexpected error")
+        log_payment_webhook_event(
+            provider=provider,
+            event_type=event_type,
+            status="error",
+            http_status=500,
+            message="Unexpected webhook exception",
+        )
         return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
 
 

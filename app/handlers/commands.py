@@ -14,6 +14,7 @@ from app.json_storage import get_storage_diagnostics
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import delete_free_access, get_total_free_claims, get_total_free_users, list_active_free_access_records
+from app.payment_webhooks import list_recent_payment_webhook_events
 from app.personal_configs import assign_personal_config_to_user, create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, list_registered_users, upsert_username
 from app.subscriptions import delete_subscription, ensure_subscription, get_remaining_text, get_subscription_plan_name
@@ -206,6 +207,7 @@ def _build_admin_help_lines() -> list[str]:
         "/adstats — статистика рекламы",
         "/paystat [n] [status] — последние платежи, статус: paid|pending",
         "/payorder <order_id> — подробности конкретного платежа",
+        "/webhookstat [n] [status] — webhook-логи оплат",
         "/diag — диагностика БД и хранилищ",
         "/profile_reset — сбросить личный VPN-профиль",
         "/clear_chat — очистить чат",
@@ -756,6 +758,52 @@ async def diagnostics_command(message: Message) -> None:
             name = str(table.get("name") or "-")
             rows = int(table.get("rows") or 0)
             lines.append(f"- {name}: {rows}")
+
+    await _send_lines_report(message, lines)
+
+
+@router.message(Command(commands=["webhookstat", "whstat"]), F.func(_is_owner))
+async def webhook_stats_command(message: Message, command: CommandObject | None = None) -> None:
+    args = (command.args or "").split() if command and command.args else []
+    limit = 20
+    status_filter: str | None = None
+    allowed_statuses = {"processed", "duplicate", "ignored", "rejected", "error"}
+
+    if args:
+        if args[0].isdigit():
+            limit = int(args[0])
+            if len(args) >= 2:
+                status_filter = args[1].strip().lower()
+        else:
+            status_filter = args[0].strip().lower()
+
+    if status_filter is not None and status_filter not in allowed_statuses:
+        await message.answer(
+            "Формат: /webhookstat [кол-во] [status]\n"
+            "Статусы: processed|duplicate|ignored|rejected|error\n"
+            "Пример: /webhookstat 30 error"
+        )
+        return
+
+    events = list_recent_payment_webhook_events(limit=limit, provider="cryptocloud", status=status_filter)
+    if not events:
+        await message.answer("Webhook-событий пока нет")
+        return
+
+    lines: list[str] = ["🪝 Webhook-логи оплат", ""]
+    for event in events:
+        event_id = int(event.get("id") or 0)
+        status = str(event.get("status") or "-")
+        http_status = int(event.get("http_status") or 0)
+        order_id = str(event.get("order_id") or "-")
+        invoice_id = str(event.get("provider_invoice_id") or "-")
+        created_at = _fmt_dt(str(event.get("created_at") or "-"))
+        message_text = str(event.get("message") or "-")
+
+        lines.append(f"#{event_id} | {status} | http={http_status} | {created_at}")
+        lines.append(f"order={order_id} | invoice={invoice_id}")
+        lines.append(f"msg={message_text}")
+        lines.append("")
 
     await _send_lines_report(message, lines)
 
