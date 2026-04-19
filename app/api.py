@@ -7,7 +7,7 @@ import logging
 import os
 import uuid
 from typing import Any
-from urllib.parse import parse_qsl, quote_plus
+from urllib.parse import parse_qsl, quote_plus, urlsplit
 
 from aiohttp import ClientSession, ClientTimeout, web
 
@@ -116,6 +116,26 @@ def _cryptocloud_credentials() -> tuple[str, str]:
     return api_token, shop_id
 
 
+def _default_cryptocloud_webhook_url() -> str:
+    configured = os.getenv("CRYPTOCLOUD_WEBHOOK_URL", "").strip()
+    if configured:
+        return configured
+
+    mini_app_url = os.getenv("TELEGRAM_MINI_APP_URL", "").strip()
+    if not mini_app_url:
+        return ""
+
+    try:
+        parsed = urlsplit(mini_app_url)
+    except Exception:
+        return ""
+
+    if parsed.scheme != "https" or not parsed.netloc:
+        return ""
+
+    return f"{parsed.scheme}://{parsed.netloc}/api/payment/cryptocloud/webhook"
+
+
 async def _create_cryptocloud_invoice(
     *,
     user_id: int,
@@ -126,7 +146,7 @@ async def _create_cryptocloud_invoice(
     if not api_token or not shop_id:
         raise RuntimeError("CryptoCloud is not configured")
 
-    callback_url = os.getenv("CRYPTOCLOUD_WEBHOOK_URL", "").strip()
+    callback_url = _default_cryptocloud_webhook_url()
     payload: dict[str, Any] = {
         "shop_id": shop_id,
         "amount": str(plan["price_rub"]),
