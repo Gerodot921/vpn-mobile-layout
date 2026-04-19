@@ -101,3 +101,35 @@ def save_json_file(path: Path, data: Any) -> None:
             connection.commit()
 
     _mirror_json_file(path, data)
+
+
+def get_storage_diagnostics() -> dict[str, Any]:
+    with _state_lock:
+        with _connect() as connection:
+            kv_count_row = connection.execute("SELECT COUNT(*) FROM kv_store").fetchone()
+            kv_count = int(kv_count_row[0]) if kv_count_row else 0
+
+            tables_raw = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+
+            tables: list[dict[str, Any]] = []
+            for table_row in tables_raw:
+                table_name = str(table_row[0])
+                try:
+                    row_count_row = connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+                    row_count = int(row_count_row[0]) if row_count_row else 0
+                except Exception:
+                    row_count = -1
+                tables.append({"name": table_name, "rows": row_count})
+
+    db_exists = STORAGE_DB_PATH.exists()
+    db_size_bytes = STORAGE_DB_PATH.stat().st_size if db_exists else 0
+
+    return {
+        "db_path": str(STORAGE_DB_PATH),
+        "db_exists": db_exists,
+        "db_size_bytes": db_size_bytes,
+        "kv_store_rows": kv_count,
+        "tables": tables,
+    }

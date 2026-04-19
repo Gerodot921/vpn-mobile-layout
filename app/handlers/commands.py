@@ -10,6 +10,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from app.ads import get_ad_stats, set_active_ad, set_ad_active
 from app.crypto_payments import list_recent_orders
+from app.json_storage import get_storage_diagnostics
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
 from app.free_access import delete_free_access, get_total_free_claims, get_total_free_users, list_active_free_access_records
@@ -204,6 +205,7 @@ def _build_admin_help_lines() -> list[str]:
         "/adoff — выключить рекламу",
         "/adstats — статистика рекламы",
         "/paystat [n] — последние платежи (по умолчанию 20)",
+        "/diag — диагностика БД и хранилищ",
         "/profile_reset — сбросить личный VPN-профиль",
         "/clear_chat — очистить чат",
     ]
@@ -722,6 +724,38 @@ async def ad_stats_command(message: Message) -> None:
         f"click: {ad.get('click_url', '-')}",
         f"seconds: {ad.get('duration_sec', '-')}",
     ]
+    await _send_lines_report(message, lines)
+
+
+@router.message(Command(commands=["diag", "dbdiag", "healthdiag"]), F.func(_is_owner))
+async def diagnostics_command(message: Message) -> None:
+    payload = get_storage_diagnostics()
+    db_exists = bool(payload.get("db_exists"))
+    db_path = str(payload.get("db_path") or "-")
+    db_size_bytes = int(payload.get("db_size_bytes") or 0)
+    db_size_kb = db_size_bytes / 1024 if db_size_bytes > 0 else 0.0
+    kv_rows = int(payload.get("kv_store_rows") or 0)
+    tables = payload.get("tables") if isinstance(payload.get("tables"), list) else []
+
+    lines: list[str] = [
+        "🧪 Диагностика хранилища",
+        "",
+        f"DB exists: {db_exists}",
+        f"DB path: {db_path}",
+        f"DB size: {db_size_kb:.1f} KB",
+        f"kv_store rows: {kv_rows}",
+        "",
+        "Таблицы:",
+    ]
+
+    if not tables:
+        lines.append("(пусто)")
+    else:
+        for table in tables:
+            name = str(table.get("name") or "-")
+            rows = int(table.get("rows") or 0)
+            lines.append(f"- {name}: {rows}")
+
     await _send_lines_report(message, lines)
 
 
