@@ -4,6 +4,7 @@ import os
 import json
 import secrets
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
@@ -19,6 +20,8 @@ AD_SESSIONS_TABLE = "ad_sessions"
 DEFAULT_AD_ASSET_URL = "https://media.tenor.com/zPU3mLwPo0IAAAAM/laughing-you-got-the-whole-squad-laughing.gif"
 DEFAULT_AD_DURATION_SECONDS = 30
 DEFAULT_SESSION_TTL_SECONDS = 600
+DB_LOCK_RETRY_ATTEMPTS = 4
+DB_LOCK_RETRY_BASE_DELAY_SECONDS = 0.25
 
 _state_lock = Lock()
 _seed_checked = False
@@ -66,6 +69,7 @@ def _connect() -> sqlite3.Connection:
     connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute("PRAGMA busy_timeout=20000")
     connection.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {ADS_STATE_TABLE} (
@@ -118,6 +122,24 @@ def _connect() -> sqlite3.Connection:
         f"CREATE INDEX IF NOT EXISTS idx_{AD_SESSIONS_TABLE}_expires_at ON {AD_SESSIONS_TABLE}(expires_at)"
     )
     return connection
+
+
+def _with_db_lock_retry(func):
+    last_error: sqlite3.OperationalError | None = None
+    for attempt in range(DB_LOCK_RETRY_ATTEMPTS):
+        try:
+            return func()
+        except sqlite3.OperationalError as exc:
+            if "database is locked" not in str(exc).lower():
+                raise
+            last_error = exc
+            if attempt >= DB_LOCK_RETRY_ATTEMPTS - 1:
+                raise
+            delay = DB_LOCK_RETRY_BASE_DELAY_SECONDS * (attempt + 1)
+            time.sleep(delay)
+
+    if last_error is not None:
+        raise last_error
 
 
 def _serialize_ad(ad: Ad) -> str:
@@ -289,17 +311,20 @@ def _load_ad_state() -> AdState:
 
 
 def _save_ad_state(state: AdState) -> None:
-    with _connect() as connection:
-        connection.execute(
-            f"INSERT OR REPLACE INTO {ADS_STATE_TABLE} (id, active_ad_json, impressions, completions, clicks) VALUES (1, ?, ?, ?, ?)",
-            (
-                _serialize_ad(state.get("active_ad") or _default_ad()),
-                int(state.get("impressions", 0)) if isinstance(state.get("impressions", 0), int) else 0,
-                int(state.get("completions", 0)) if isinstance(state.get("completions", 0), int) else 0,
-                int(state.get("clicks", 0)) if isinstance(state.get("clicks", 0), int) else 0,
-            ),
-        )
-        connection.commit()
+    def _write() -> None:
+        with _connect() as connection:
+            connection.execute(
+                f"INSERT OR REPLACE INTO {ADS_STATE_TABLE} (id, active_ad_json, impressions, completions, clicks) VALUES (1, ?, ?, ?, ?)",
+                (
+                    _serialize_ad(state.get("active_ad") or _default_ad()),
+                    int(state.get("impressions", 0)) if isinstance(state.get("impressions", 0), int) else 0,
+                    int(state.get("completions", 0)) if isinstance(state.get("completions", 0), int) else 0,
+                    int(state.get("clicks", 0)) if isinstance(state.get("clicks", 0), int) else 0,
+                ),
+            )
+            connection.commit()
+
+    _with_db_lock_retry(_write)
 
 
 def _load_sessions() -> dict[str, AdSession]:
@@ -339,29 +364,32 @@ def _load_sessions() -> dict[str, AdSession]:
 
 
 def _save_sessions(sessions: dict[str, AdSession]) -> None:
-    with _connect() as connection:
-        connection.execute(f"DELETE FROM {AD_SESSIONS_TABLE}")
-        for token, session in sessions.items():
-            connection.execute(
-                f"""
-                INSERT OR REPLACE INTO {AD_SESSIONS_TABLE}
-                (session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    token,
-                    int(session.get("user_id", 0)) if isinstance(session.get("user_id", 0), int) else 0,
-                    str(session.get("ad_id") or ""),
-                    str(session.get("started_at") or _now_utc().isoformat()),
-                    str(session.get("expires_at") or _now_utc().isoformat()),
-                    int(session.get("required_seconds", DEFAULT_AD_DURATION_SECONDS))
-                    if isinstance(session.get("required_seconds", DEFAULT_AD_DURATION_SECONDS), int)
-                    else DEFAULT_AD_DURATION_SECONDS,
-                    1 if bool(session.get("completed", False)) else 0,
-                    1 if bool(session.get("clicked", False)) else 0,
-                ),
-            )
-        connection.commit()
+    def _write() -> None:
+        with _connect() as connection:
+            connection.execute(f"DELETE FROM {AD_SESSIONS_TABLE}")
+            for token, session in sessions.items():
+                connection.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {AD_SESSIONS_TABLE}
+                    (session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        token,
+                        int(session.get("user_id", 0)) if isinstance(session.get("user_id", 0), int) else 0,
+                        str(session.get("ad_id") or ""),
+                        str(session.get("started_at") or _now_utc().isoformat()),
+                        str(session.get("expires_at") or _now_utc().isoformat()),
+                        int(session.get("required_seconds", DEFAULT_AD_DURATION_SECONDS))
+                        if isinstance(session.get("required_seconds", DEFAULT_AD_DURATION_SECONDS), int)
+                        else DEFAULT_AD_DURATION_SECONDS,
+                        1 if bool(session.get("completed", False)) else 0,
+                        1 if bool(session.get("clicked", False)) else 0,
+                    ),
+                )
+            connection.commit()
+
+    _with_db_lock_retry(_write)
 
 
 def _session_ttl_seconds() -> int:
