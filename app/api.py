@@ -37,6 +37,7 @@ from app.wireguard import ensure_wireguard_profile
 from app.subscriptions import get_remaining_text, get_subscription_plan_name, get_subscription_record, is_subscription_active
 from app.subscriptions import extend_subscription
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
+from app.date_format import format_human_datetime
 
 
 PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
@@ -565,7 +566,7 @@ async def claim_free_access(request: web.Request) -> web.Response:
                 else FREE_ACCESS_ACTIVE_TEXT_TEMPLATE
             ).format(
                 access_key=record["access_key"],
-                expires_at=record["expires_at"],
+                expires_at=format_human_datetime(record["expires_at"]),
                 remaining=format_free_access_remaining_text(user_id),
             )
             try:

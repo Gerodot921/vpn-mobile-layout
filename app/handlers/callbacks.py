@@ -33,6 +33,7 @@ from app.texts import (
     SUPPORT_STUB_TEXT,
     WELCOME_TEXT,
 )
+from app.date_format import format_human_datetime
 
 router = Router()
 
@@ -70,7 +71,7 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
                 await callback.message.answer(
                     FREE_ACCESS_GRANTED_TEXT_TEMPLATE.format(
                         access_key=invitee_record["access_key"],
-                        expires_at=invitee_record["expires_at"],
+                        expires_at=format_human_datetime(invitee_record["expires_at"]),
                         remaining=format_free_access_remaining_text(user_id),
                     ),
                     disable_web_page_preview=True,
@@ -91,7 +92,7 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
                 referrer_id,
                 FREE_ACCESS_ACTIVE_TEXT_TEMPLATE.format(
                     access_key=referrer_record["access_key"],
-                    expires_at=referrer_record["expires_at"],
+                    expires_at=format_human_datetime(referrer_record["expires_at"]),
                     remaining=format_free_access_remaining_text(referrer_id),
                 ),
                 disable_web_page_preview=True,

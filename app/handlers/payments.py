@@ -6,6 +6,7 @@ from aiogram.types import BufferedInputFile, Message, PreCheckoutQuery
 
 from app.subscriptions import extend_subscription
 from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile
+from app.date_format import format_human_datetime
 
 router = Router()
 
@@ -67,7 +68,7 @@ async def on_successful_payment(message: Message) -> None:
     }
     plan_name = plan_name_by_code.get(plan_code, "Базовый")
     record = extend_subscription(user.id, days, plan_name=plan_name)
-    expires_at = record.get("expires_at", "-")
+    expires_at = format_human_datetime(record.get("expires_at"))
     profile = ensure_wireguard_profile(user.id)
     profile_id = profile.get("profile_id", "-")
     config_filename = get_wireguard_config_filename(user.id)

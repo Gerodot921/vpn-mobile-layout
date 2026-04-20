@@ -27,6 +27,7 @@ from app.texts import (
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
 from app.wireguard import add_peer_to_server, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.date_format import format_human_datetime
 
 # Owner ID for admin commands
 OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
@@ -40,10 +41,7 @@ def _is_owner(message: Message) -> bool:
 
 
 def _fmt_dt(value: str) -> str:
-    try:
-        return datetime.fromisoformat(value).strftime("%d.%m.%Y %H:%M")
-    except Exception:
-        return value
+    return format_human_datetime(value)
 
 
 async def _resolve_user_label(message: Message, user_id: int) -> str:

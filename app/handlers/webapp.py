@@ -15,6 +15,7 @@ from app.referrals import ensure_user
 from app.subscriptions import ensure_subscription
 from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
+from app.date_format import format_human_datetime
 
 router = Router()
 
@@ -75,7 +76,7 @@ async def webapp_data(message: Message) -> None:
         await message.answer(
             FREE_ACCESS_GRANTED_TEXT_TEMPLATE.format(
                 access_key=record["access_key"],
-                expires_at=record["expires_at"],
+                expires_at=format_human_datetime(record["expires_at"]),
                 remaining=remaining_text,
             ),
             disable_web_page_preview=True,
@@ -84,7 +85,7 @@ async def webapp_data(message: Message) -> None:
         await message.answer(
             FREE_ACCESS_ACTIVE_TEXT_TEMPLATE.format(
                 access_key=record["access_key"],
-                expires_at=record["expires_at"],
+                expires_at=format_human_datetime(record["expires_at"]),
                 remaining=remaining_text,
             ),
             disable_web_page_preview=True,
