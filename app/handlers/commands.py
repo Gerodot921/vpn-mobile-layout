@@ -14,11 +14,11 @@ from app.crypto_payments import get_order_by_id, list_recent_orders
 from app.json_storage import get_storage_diagnostics
 from app.keyboards.inline import mini_app_only_keyboard
 from app.keyboards.inline import subscription_inline_keyboard
-from app.free_access import delete_free_access, get_total_free_claims, get_total_free_users, list_active_free_access_records
+from app.free_access import DEFAULT_FREE_ACCESS_HOURS, delete_free_access, get_total_free_claims, get_total_free_users, grant_free_access, list_active_free_access_records, mark_free_access_peer_added
 from app.payment_webhooks import get_payment_webhook_status_summary, list_recent_payment_webhook_events
 from app.personal_configs import assign_personal_config_to_user, create_personal_configs, delete_personal_config, list_active_personal_configs, list_personal_configs, revoke_expired_personal_configs
 from app.referrals import get_known_username, get_user_id_by_username, list_known_user_ids, list_registered_users, upsert_username
-from app.subscriptions import delete_subscription, ensure_subscription, get_remaining_text, get_subscription_plan_name
+from app.subscriptions import delete_subscription, ensure_subscription, extend_subscription, get_remaining_text, get_subscription_plan_name
 from app.subscriptions import list_active_subscriptions
 from app.texts import (
     FREE_ACCESS_PANEL_TEXT,
@@ -31,6 +31,22 @@ from app.date_format import format_human_datetime
 
 # Owner ID for admin commands
 OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
+
+PAID_PLAN_ALIASES: dict[str, str] = {
+    "basic": "Базовый",
+    "базовый": "Базовый",
+    "double": "Двойня",
+    "двойня": "Двойня",
+    "trio": "Трио",
+    "трио": "Трио",
+    "together": "Вместе",
+    "вместе": "Вместе",
+    "family": "Семейный",
+    "семейный": "Семейный",
+    # Legacy aliases.
+    "standard": "Двойня",
+    "premium": "Семейный",
+}
 
 router = Router()
 
@@ -199,6 +215,7 @@ def _build_admin_help_lines() -> list[str]:
         "/allstat — общая статистика по всем типам",
         "/create <n> <m> — создать n персональных конфигов на m дней",
         "/delete <config_id> — удалить персональный конфиг по ID",
+        "/addtarif <username> <tariff> — выдать тариф (free|blatnoy|paid/basic/double/trio/together/family)",
         "/deletetarif <username> <free|blatnoy|paid> — удалить тариф и его конфиг",
         "/adset <asset_url> [seconds] [click_url] — установить рекламу",
         "/adon — включить рекламу",
@@ -244,6 +261,12 @@ def _mini_app_text_with_fallback() -> str:
             f"Если кнопка не сработала, откройте ссылку вручную:\n{url}"
         )
     return MINI_APP_ENTRY_TEXT
+
+
+def _resolve_paid_plan_name(raw_tariff: str) -> str | None:
+    normalized = raw_tariff.strip().lower().replace("ё", "е")
+    normalized = " ".join(normalized.split())
+    return PAID_PLAN_ALIASES.get(normalized)
 
 
 @router.message(Command(commands=["clear_chat", "ckear_chat"]), F.func(_is_owner))
@@ -551,6 +574,110 @@ async def delete_tarif_command(message: Message, command: CommandObject | None =
             removed_lines.append(f"Удалён WireGuard профиль: {profile.get('config_filename', '-')}")
 
     await message.answer("\n".join([f"Тариф @{username_arg} ({tier_arg}) удалён."] + removed_lines))
+
+
+@router.message(Command(commands=["addtarif"]), F.func(_is_owner))
+async def add_tarif_command(message: Message, command: CommandObject | None = None) -> None:
+    args = (command.args or "").split() if command else []
+    if len(args) != 2:
+        await message.answer(
+            "Формат: /addtarif <username> <tariff>\n"
+            "Где tariff: free | blatnoy | paid | basic | double | trio | together | family\n"
+            "Пример: /addtarif testuser double"
+        )
+        return
+
+    username_arg = args[0].strip().lstrip("@")
+    tariff_arg = args[1].strip().lower()
+    if not username_arg:
+        await message.answer("Укажите username пользователя")
+        return
+
+    target_user_id = await _resolve_user_id_by_username(message, username_arg)
+    if target_user_id is None:
+        await message.answer(f"Пользователь @{username_arg} не найден в базе")
+        return
+
+    lines: list[str] = [f"Пользователь: @{username_arg} | id={target_user_id}"]
+
+    if tariff_arg == "free":
+        record, created = grant_free_access(
+            target_user_id,
+            hours=DEFAULT_FREE_ACCESS_HOURS,
+            source="admin_addtarif",
+            force_extend=True,
+        )
+        ensure_wireguard_profile(target_user_id)
+        if add_peer_to_server(target_user_id):
+            mark_free_access_peer_added(target_user_id)
+
+        lines.append(f"Выдан тариф: free ({'новый' if created else 'продлён'})")
+        lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
+        lines.append(f"Конфиг: {record.get('vpn_config_name', '-')}")
+
+    elif tariff_arg == "blatnoy":
+        active_configs = list_active_personal_configs()
+        target_config = next(
+            (
+                record
+                for record in active_configs
+                if record.get("assigned_user_id") in {None, target_user_id}
+            ),
+            None,
+        )
+
+        if target_config is None:
+            created_configs = create_personal_configs(count=1, days=30)
+            if not created_configs:
+                await message.answer("Не удалось создать персональный конфиг")
+                return
+            target_config = created_configs[0]
+
+        assigned = assign_personal_config_to_user(target_config["config_id"], target_user_id, username_arg)
+        if not assigned:
+            await message.answer("Не удалось назначить персональный тариф")
+            return
+
+        lines.append("Выдан тариф: blatnoy")
+        lines.append(f"Config ID: {target_config.get('config_id', '-')}")
+        lines.append(f"Файл: {target_config.get('config_filename', '-')}")
+        lines.append(f"До: {_fmt_dt(target_config.get('expires_at', '-'))}")
+
+    else:
+        if tariff_arg == "paid":
+            plan_name = "Базовый"
+        else:
+            plan_name = _resolve_paid_plan_name(tariff_arg)
+
+        if plan_name is None:
+            await message.answer(
+                "Тариф должен быть одним из: free, blatnoy, paid, basic, double, trio, together, family"
+            )
+            return
+
+        record = extend_subscription(target_user_id, 30, plan_name=plan_name)
+        ensure_wireguard_profile(target_user_id)
+        add_peer_to_server(target_user_id)
+
+        lines.append("Выдан тариф: paid")
+        lines.append(f"План: {plan_name}")
+        lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
+
+    config_text = get_wireguard_config_text(target_user_id)
+    config_filename = get_wireguard_config_filename(target_user_id)
+    if config_text:
+        try:
+            await message.bot.send_document(
+                target_user_id,
+                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                caption="Ваш тариф назначен администратором.",
+            )
+            lines.append(f"Конфиг отправлен пользователю: {config_filename}")
+        except Exception:
+            logging.exception("Failed to send config after /addtarif to user_id=%s", target_user_id)
+            lines.append("Не удалось отправить конфиг пользователю")
+
+    await message.answer("\n".join(lines))
 
 
 @router.message(Command(commands=["ahelp"]), F.func(_is_owner))
