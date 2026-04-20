@@ -557,10 +557,37 @@ body {
   font-weight: 800;
 }
 
-.tariff-price {
-  font-size: 14px;
-  font-weight: 700;
-  color: #b8dcff;
+.tariff-discount-badge {
+  border: 1px solid rgba(255, 107, 122, 0.65);
+  background: rgba(255, 107, 122, 0.2);
+  color: #ffd9de;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 3px 8px;
+}
+
+.tariff-price-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tariff-price-old {
+  font-size: 13px;
+  color: #8da5c3;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  text-decoration-color: rgba(255, 107, 122, 0.8);
+}
+
+.tariff-price-new {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  color: #64ffc7;
+  text-shadow: 0 0 18px rgba(100, 255, 199, 0.26);
 }
 
 .tariff-meta {

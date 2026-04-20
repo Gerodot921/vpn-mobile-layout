@@ -250,38 +250,62 @@ const tariffPlans = [
   {
     code: "basic",
     name: "Базовый",
-    priceRub: 50,
+    priceRub: 90,
+    oldPriceRub: 120,
+    discountPercent: 25,
+    stars: 158,
     durationDays: 30,
     duration: "1 месяц",
-    keys: "1 ключ на 1 устройство",
-    note: "Для личного использования",
+    keys: "1 устройство",
+    note: "На старте скидка 25%",
   },
   {
-    code: "standard",
-    name: "Стандарт",
-    priceRub: 129,
+    code: "double",
+    name: "Двойня",
+    priceRub: 184,
+    oldPriceRub: 230,
+    discountPercent: 20,
+    stars: 322,
     durationDays: 30,
     duration: "1 месяц",
-    keys: "3 ключа на 3 устройства",
-    note: "Телефон, планшет и ноутбук",
+    keys: "2 устройства",
+    note: "На старте скидка 20%",
+  },
+  {
+    code: "trio",
+    name: "Трио",
+    priceRub: 289,
+    oldPriceRub: 340,
+    discountPercent: 15,
+    stars: 506,
+    durationDays: 30,
+    duration: "1 месяц",
+    keys: "3 устройства",
+    note: "На старте скидка 15%",
+  },
+  {
+    code: "together",
+    name: "Вместе",
+    priceRub: 423,
+    oldPriceRub: 470,
+    discountPercent: 10,
+    stars: 740,
+    durationDays: 30,
+    duration: "1 месяц",
+    keys: "4 устройства",
+    note: "На старте скидка 10%",
   },
   {
     code: "family",
     name: "Семейный",
-    priceRub: 299,
-    durationDays: 90,
-    duration: "3 месяца",
-    keys: "5 ключей на 5 устройств",
-    note: "Оптимально для семьи",
-  },
-  {
-    code: "premium",
-    name: "Премиум",
-    priceRub: 999,
-    durationDays: 365,
-    duration: "12 месяцев",
-    keys: "10 ключей на 10 устройств",
-    note: "Максимальная выгода",
+    priceRub: 531,
+    oldPriceRub: 590,
+    discountPercent: 10,
+    stars: 929,
+    durationDays: 30,
+    duration: "1 месяц",
+    keys: "5 устройств",
+    note: "На старте скидка 10%",
   },
 ];
 
@@ -871,7 +895,7 @@ function openPaymentModal() {
 
   const selected = currentTariff();
   if (paymentModalTariffText) {
-    paymentModalTariffText.textContent = `Тариф: ${selected.name} • ${selected.priceRub} ₽ • ${selected.duration}`;
+    paymentModalTariffText.textContent = `Тариф: ${selected.name} • ${formatRub(selected.oldPriceRub)} ₽ -> ${formatRub(selected.priceRub)} ₽ • ${selected.stars} ⭐ • ${selected.duration}`;
   }
   renderPaymentMethodsForModal();
   paymentModal.classList.remove("hidden");
@@ -1446,6 +1470,15 @@ function currentTariff() {
   return tariffPlans[state.tariffIndex];
 }
 
+
+function formatRub(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "0";
+  }
+  return new Intl.NumberFormat("ru-RU").format(Math.round(numeric));
+}
+
 function renderTariffList() {
   tariffList.innerHTML = "";
 
@@ -1460,10 +1493,14 @@ function renderTariffList() {
     item.innerHTML = `
       <div class="tariff-top">
         <span class="tariff-name">${plan.name}</span>
-        <span class="tariff-price">${plan.priceRub} ₽</span>
+        <span class="tariff-discount-badge">-${plan.discountPercent}%</span>
+      </div>
+      <div class="tariff-price-row">
+        <span class="tariff-price-old">${formatRub(plan.oldPriceRub)} ₽</span>
+        <span class="tariff-price-new">${formatRub(plan.priceRub)} ₽</span>
       </div>
       <p class="tariff-meta">${plan.keys} • ${plan.duration}</p>
-      <p class="tariff-note">${plan.note}</p>
+      <p class="tariff-note">${plan.note} • ${plan.stars} ⭐</p>
     `;
 
     item.addEventListener("click", () => {
@@ -1475,7 +1512,7 @@ function renderTariffList() {
   });
 
   const selected = currentTariff();
-  selectedTariffHint.textContent = `Выбран тариф: ${selected.name} (${selected.priceRub} ₽)`;
+  selectedTariffHint.textContent = `Выбран тариф: ${selected.name} • ${formatRub(selected.priceRub)} ₽ • ${selected.stars} ⭐`;
   subscriptionBtn.textContent = "💳 Оплатить выбранный тариф";
 }
 

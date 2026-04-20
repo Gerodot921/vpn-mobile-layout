@@ -62,9 +62,13 @@ async def on_successful_payment(message: Message) -> None:
 
     plan_name_by_code = {
         "basic": "Базовый",
-        "standard": "Стандарт",
+        "double": "Двойня",
+        "trio": "Трио",
+        "together": "Вместе",
         "family": "Семейный",
-        "premium": "Премиум",
+        # Legacy aliases for old paid plans.
+        "standard": "Двойня",
+        "premium": "Семейный",
     }
     plan_name = plan_name_by_code.get(plan_code, "Базовый")
     record = extend_subscription(user.id, days, plan_name=plan_name)
