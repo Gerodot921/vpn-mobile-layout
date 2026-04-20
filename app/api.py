@@ -459,6 +459,12 @@ async def user_state(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
 
 
+def _chunk_text(value: str, chunk_size: int = 3500) -> list[str]:
+    if not value:
+        return []
+    return [value[i : i + chunk_size] for i in range(0, len(value), chunk_size)]
+
+
 async def claim_free_access(request: web.Request) -> web.Response:
     try:
         payload = await _read_request_json(request)
@@ -565,15 +571,36 @@ async def claim_free_access(request: web.Request) -> web.Response:
             try:
                 await bot.send_message(user_id, message_text, disable_web_page_preview=True)
                 config_text = get_wireguard_config_text(user_id)
+                if not config_text:
+                    ensure_wireguard_profile(user_id)
+                    config_text = get_wireguard_config_text(user_id)
+
                 if config_text:
                     config_name = get_wireguard_config_filename(user_id)
-                    await bot.send_document(
-                        user_id,
-                        BufferedInputFile(config_text.encode("utf-8"), filename=config_name),
-                        caption="Профиль WireGuard / AmneziaWG",
-                    )
+                    try:
+                        await bot.send_document(
+                            user_id,
+                            BufferedInputFile(config_text.encode("utf-8"), filename=config_name),
+                            caption="Профиль WireGuard / AmneziaWG",
+                        )
+                    except Exception:
+                        logging.exception("Failed to send .conf as document in /api/claim-free-access for user_id=%s", user_id)
+                        await bot.send_message(
+                            user_id,
+                            "Не удалось отправить .conf файлом, отправляю конфиг текстом.",
+                            disable_web_page_preview=True,
+                        )
+                        header = f"Имя файла: {config_name}\n"
+                        for idx, part in enumerate(_chunk_text(config_text), start=1):
+                            prefix = header if idx == 1 else ""
+                            await bot.send_message(user_id, prefix + part, disable_web_page_preview=True)
                 else:
                     logging.warning("WireGuard config text is empty for user_id=%s", user_id)
+                    await bot.send_message(
+                        user_id,
+                        "Не удалось сформировать .conf автоматически. Напишите /getconf, отправим вручную.",
+                        disable_web_page_preview=True,
+                    )
             except Exception:
                 logging.exception("Telegram notify step failed for user_id=%s", user_id)
 

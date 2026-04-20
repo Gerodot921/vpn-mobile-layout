@@ -19,6 +19,12 @@ from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT
 router = Router()
 
 
+def _chunk_text(value: str, chunk_size: int = 3500) -> list[str]:
+    if not value:
+        return []
+    return [value[i : i + chunk_size] for i in range(0, len(value), chunk_size)]
+
+
 def _format_payload(data: str | None) -> dict[str, object]:
     if not data:
         return {}
@@ -85,16 +91,52 @@ async def webapp_data(message: Message) -> None:
         )
 
     config_text = get_wireguard_config_text(user_id)
-    if config_text:
-        filename = get_wireguard_config_filename(user_id)
-        try:
-            add_peer_to_server(user_id)
-            await message.answer_document(
-                BufferedInputFile(config_text.encode("utf-8"), filename=filename),
-                caption="Профиль WireGuard / AmneziaWG",
-            )
-        except Exception:
-            logging.exception("Failed to send WebApp .conf document for user_id=%s", user_id)
-            await message.answer(f"Не удалось отправить файл документом. Конфиг:\n{filename}\n\n{config_text}")
-    else:
+    if not config_text:
+        # Force regenerate once if profile exists but config text is missing.
+        ensure_wireguard_profile(user_id)
+        config_text = get_wireguard_config_text(user_id)
+
+    if not config_text:
         logging.warning("WireGuard config text is empty in webapp flow for user_id=%s", user_id)
+        await message.answer(
+            "Не удалось сформировать .conf профиль автоматически. Напишите /getconf и мы отправим его вручную.",
+            disable_web_page_preview=True,
+        )
+        return
+
+    filename = get_wireguard_config_filename(user_id)
+    add_peer_to_server(user_id)
+
+    try:
+        await message.answer_document(
+            BufferedInputFile(config_text.encode("utf-8"), filename=filename),
+            caption="Профиль WireGuard / AmneziaWG",
+        )
+        return
+    except Exception:
+        logging.exception("Failed to send WebApp .conf document in chat for user_id=%s", user_id)
+
+    # Fallback 1: send file directly to user dialog.
+    try:
+        await message.bot.send_document(
+            user_id,
+            BufferedInputFile(config_text.encode("utf-8"), filename=filename),
+            caption="Профиль WireGuard / AmneziaWG",
+        )
+        await message.answer(
+            "Файл не отправился в этот чат, но мы отправили .conf в личные сообщения бота.",
+            disable_web_page_preview=True,
+        )
+        return
+    except Exception:
+        logging.exception("Failed to send WebApp .conf document in DM for user_id=%s", user_id)
+
+    # Fallback 2: send config as plain text chunks.
+    await message.answer(
+        "Не удалось отправить файл документом. Отправляю конфиг текстом ниже:",
+        disable_web_page_preview=True,
+    )
+    header = f"Имя файла: {filename}\n"
+    for idx, part in enumerate(_chunk_text(config_text), start=1):
+        prefix = header if idx == 1 else ""
+        await message.answer(prefix + part, disable_web_page_preview=True)
