@@ -24,6 +24,8 @@ DB_LOCK_RETRY_ATTEMPTS = 4
 DB_LOCK_RETRY_BASE_DELAY_SECONDS = 0.25
 
 _state_lock = Lock()
+_schema_lock = Lock()
+_schema_checked = False
 _seed_checked = False
 
 
@@ -65,63 +67,86 @@ def _parse_dt(value: str) -> datetime:
 
 
 def _connect() -> sqlite3.Connection:
+    _ensure_schema()
+    return _open_connection()
+
+
+def _open_connection() -> sqlite3.Connection:
     STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
     connection.execute("PRAGMA busy_timeout=20000")
-    connection.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {ADS_STATE_TABLE} (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            active_ad_json TEXT NOT NULL,
-            impressions INTEGER NOT NULL,
-            completions INTEGER NOT NULL,
-            clicks INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-    connection.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {AD_SESSIONS_TABLE} (
-            session_token TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            ad_id TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            required_seconds INTEGER NOT NULL DEFAULT 30,
-            completed INTEGER NOT NULL,
-            clicked INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-    # Lightweight schema migration for existing DBs.
-    state_columns = {
-        row[1]
-        for row in connection.execute(f"PRAGMA table_info({ADS_STATE_TABLE})").fetchall()
-        if len(row) >= 2
-    }
-    if "clicks" not in state_columns:
-        connection.execute(f"ALTER TABLE {ADS_STATE_TABLE} ADD COLUMN clicks INTEGER NOT NULL DEFAULT 0")
-
-    session_columns = {
-        row[1]
-        for row in connection.execute(f"PRAGMA table_info({AD_SESSIONS_TABLE})").fetchall()
-        if len(row) >= 2
-    }
-    if "required_seconds" not in session_columns:
-        connection.execute(
-            f"ALTER TABLE {AD_SESSIONS_TABLE} ADD COLUMN required_seconds INTEGER NOT NULL DEFAULT {DEFAULT_AD_DURATION_SECONDS}"
-        )
-    if "clicked" not in session_columns:
-        connection.execute(f"ALTER TABLE {AD_SESSIONS_TABLE} ADD COLUMN clicked INTEGER NOT NULL DEFAULT 0")
-    connection.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_{AD_SESSIONS_TABLE}_user_id ON {AD_SESSIONS_TABLE}(user_id)"
-    )
-    connection.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_{AD_SESSIONS_TABLE}_expires_at ON {AD_SESSIONS_TABLE}(expires_at)"
-    )
     return connection
+
+
+def _ensure_schema() -> None:
+    global _schema_checked
+    if _schema_checked:
+        return
+
+    with _schema_lock:
+        if _schema_checked:
+            return
+
+        def _init_schema() -> None:
+            with _open_connection() as connection:
+                connection.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {ADS_STATE_TABLE} (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        active_ad_json TEXT NOT NULL,
+                        impressions INTEGER NOT NULL,
+                        completions INTEGER NOT NULL,
+                        clicks INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                connection.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {AD_SESSIONS_TABLE} (
+                        session_token TEXT PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        ad_id TEXT NOT NULL,
+                        started_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        required_seconds INTEGER NOT NULL DEFAULT 30,
+                        completed INTEGER NOT NULL,
+                        clicked INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+
+                state_columns = {
+                    row[1]
+                    for row in connection.execute(f"PRAGMA table_info({ADS_STATE_TABLE})").fetchall()
+                    if len(row) >= 2
+                }
+                if "clicks" not in state_columns:
+                    connection.execute(f"ALTER TABLE {ADS_STATE_TABLE} ADD COLUMN clicks INTEGER NOT NULL DEFAULT 0")
+
+                session_columns = {
+                    row[1]
+                    for row in connection.execute(f"PRAGMA table_info({AD_SESSIONS_TABLE})").fetchall()
+                    if len(row) >= 2
+                }
+                if "required_seconds" not in session_columns:
+                    connection.execute(
+                        f"ALTER TABLE {AD_SESSIONS_TABLE} ADD COLUMN required_seconds INTEGER NOT NULL DEFAULT {DEFAULT_AD_DURATION_SECONDS}"
+                    )
+                if "clicked" not in session_columns:
+                    connection.execute(f"ALTER TABLE {AD_SESSIONS_TABLE} ADD COLUMN clicked INTEGER NOT NULL DEFAULT 0")
+
+                connection.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{AD_SESSIONS_TABLE}_user_id ON {AD_SESSIONS_TABLE}(user_id)"
+                )
+                connection.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{AD_SESSIONS_TABLE}_expires_at ON {AD_SESSIONS_TABLE}(expires_at)"
+                )
+                connection.commit()
+
+        _with_db_lock_retry(_init_schema)
+        _schema_checked = True
 
 
 def _with_db_lock_retry(func):
@@ -348,29 +373,11 @@ def _load_sessions() -> dict[str, AdSession]:
     rows = _with_db_lock_retry(_read_rows)
 
     for row in rows:
-        try:
-            token = str(row[0])
-            user_id = int(row[1])
-            ad_id = str(row[2])
-            started_at = str(row[3])
-            expires_at = str(row[4])
-            required_seconds = int(row[5])
-            required_seconds = min(max(required_seconds, 5), 300)
-            completed = bool(row[6])
-            clicked = bool(row[7])
-        except Exception:
-            # Skip malformed legacy rows instead of crashing ad endpoints.
+        token = str(row[0])
+        parsed = _row_to_session(row)
+        if parsed is None:
             continue
-
-        sessions[token] = {
-            "user_id": user_id,
-            "ad_id": ad_id,
-            "started_at": started_at,
-            "expires_at": expires_at,
-            "required_seconds": required_seconds,
-            "completed": completed,
-            "clicked": clicked,
-        }
+        sessions[token] = parsed
 
     return sessions
 
@@ -399,6 +406,73 @@ def _save_sessions(sessions: dict[str, AdSession]) -> None:
                         1 if bool(session.get("clicked", False)) else 0,
                     ),
                 )
+            connection.commit()
+
+    _with_db_lock_retry(_write)
+
+
+def _row_to_session(row: tuple[Any, ...]) -> AdSession | None:
+    try:
+        user_id = int(row[1])
+        ad_id = str(row[2])
+        started_at = str(row[3])
+        expires_at = str(row[4])
+        required_seconds = int(row[5])
+        required_seconds = min(max(required_seconds, 5), 300)
+        completed = bool(row[6])
+        clicked = bool(row[7])
+    except Exception:
+        return None
+
+    return {
+        "user_id": user_id,
+        "ad_id": ad_id,
+        "started_at": started_at,
+        "expires_at": expires_at,
+        "required_seconds": required_seconds,
+        "completed": completed,
+        "clicked": clicked,
+    }
+
+
+def _load_session_by_token(session_token: str) -> AdSession | None:
+    _ensure_seeded()
+
+    def _read_row() -> Any:
+        with _connect() as connection:
+            return connection.execute(
+                f"SELECT session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked FROM {AD_SESSIONS_TABLE} WHERE session_token = ?",
+                (session_token,),
+            ).fetchone()
+
+    row = _with_db_lock_retry(_read_row)
+    if row is None:
+        return None
+    return _row_to_session(row)
+
+
+def _upsert_session(session_token: str, session: AdSession) -> None:
+    def _write() -> None:
+        with _connect() as connection:
+            connection.execute(
+                f"""
+                INSERT OR REPLACE INTO {AD_SESSIONS_TABLE}
+                (session_token, user_id, ad_id, started_at, expires_at, required_seconds, completed, clicked)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_token,
+                    int(session.get("user_id", 0)) if isinstance(session.get("user_id", 0), int) else 0,
+                    str(session.get("ad_id") or ""),
+                    str(session.get("started_at") or _now_utc().isoformat()),
+                    str(session.get("expires_at") or _now_utc().isoformat()),
+                    int(session.get("required_seconds", DEFAULT_AD_DURATION_SECONDS))
+                    if isinstance(session.get("required_seconds", DEFAULT_AD_DURATION_SECONDS), int)
+                    else DEFAULT_AD_DURATION_SECONDS,
+                    1 if bool(session.get("completed", False)) else 0,
+                    1 if bool(session.get("clicked", False)) else 0,
+                ),
+            )
             connection.commit()
 
     _with_db_lock_retry(_write)
@@ -433,8 +507,7 @@ def start_ad_session(user_id: int) -> tuple[Ad | None, str | None]:
 
         token = f"ad_{secrets.token_urlsafe(20)}"
         now = _now_utc()
-        sessions = _load_sessions()
-        sessions[token] = {
+        session: AdSession = {
             "user_id": user_id,
             "ad_id": ad["ad_id"],
             "started_at": now.isoformat(),
@@ -443,7 +516,7 @@ def start_ad_session(user_id: int) -> tuple[Ad | None, str | None]:
             "completed": False,
             "clicked": False,
         }
-        _save_sessions(sessions)
+        _upsert_session(token, session)
 
         state["impressions"] = state.get("impressions", 0) + 1
         _save_ad_state(state)
@@ -456,8 +529,7 @@ def complete_ad_session(user_id: int, session_token: str, watched_seconds: int) 
         return False, "Missing ad session token"
 
     with _state_lock:
-        sessions = _load_sessions()
-        session = sessions.get(session_token)
+        session = _load_session_by_token(session_token)
         if session is None:
             return False, "Ad session not found"
 
@@ -489,8 +561,7 @@ def complete_ad_session(user_id: int, session_token: str, watched_seconds: int) 
             return False, f"Insufficient watch time ({effective_watched}/{required})"
 
         session["completed"] = True
-        sessions[session_token] = session
-        _save_sessions(sessions)
+        _upsert_session(session_token, session)
 
         state = _load_ad_state()
         state["completions"] = state.get("completions", 0) + 1
@@ -515,8 +586,7 @@ def register_ad_click(user_id: int, session_token: str) -> tuple[bool, str]:
         return False, "Missing ad session token"
 
     with _state_lock:
-        sessions = _load_sessions()
-        session = sessions.get(session_token)
+        session = _load_session_by_token(session_token)
         if session is None:
             return False, "Ad session not found"
         if session["user_id"] != user_id:
@@ -533,8 +603,7 @@ def register_ad_click(user_id: int, session_token: str) -> tuple[bool, str]:
             return True, "already"
 
         session["clicked"] = True
-        sessions[session_token] = session
-        _save_sessions(sessions)
+        _upsert_session(session_token, session)
 
         state = _load_ad_state()
         state["clicks"] = int(state.get("clicks", 0)) + 1
