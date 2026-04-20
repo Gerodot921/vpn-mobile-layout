@@ -688,10 +688,25 @@ function renderAccessConfigs(accessConfigs) {
   configs.forEach((item) => {
     const tier = typeof item?.tier === "string" ? item.tier : "none";
     const title = typeof item?.title === "string" && item.title ? item.title : accessTitleByTier(tier);
-    const tariffName = typeof item?.tariffName === "string" && item.tariffName ? item.tariffName : title;
-    const configName = typeof item?.configName === "string" && item.configName ? item.configName : "-";
-    const keyValue = typeof item?.keyValue === "string" && item.keyValue ? item.keyValue : "-";
-    const expiresText = formatDateTime(item?.expiresAt);
+    const tariffName =
+      typeof item?.tariffName === "string" && item.tariffName
+        ? item.tariffName
+        : typeof item?.tariff_name === "string" && item.tariff_name
+          ? item.tariff_name
+          : title;
+    const configName =
+      typeof item?.configName === "string" && item.configName
+        ? item.configName
+        : typeof item?.config_name === "string" && item.config_name
+          ? item.config_name
+          : "";
+    const keyValue =
+      typeof item?.keyValue === "string" && item.keyValue
+        ? item.keyValue
+        : typeof item?.key_value === "string" && item.key_value
+          ? item.key_value
+          : "";
+    const expiresText = formatDateTime(item?.expiresAt || item?.expires_at);
     const row = document.createElement("div");
     row.className = `access-config-item tier-${tier}`;
     row.innerHTML = `
@@ -700,9 +715,9 @@ function renderAccessConfigs(accessConfigs) {
         <span class="access-config-badge">${tariffName}</span>
       </div>
       <div class="access-config-meta">
-        <div><strong>Конфиг:</strong> ${configName}</div>
-        <div><strong>Ключ:</strong> ${keyValue}</div>
-        <div><strong>Действует до:</strong> ${expiresText}</div>
+        ${configName ? `<div><strong>Конфиг:</strong> ${configName}</div>` : ""}
+        ${keyValue ? `<div><strong>Ключ:</strong> ${keyValue}</div>` : ""}
+        ${expiresText && expiresText !== "-" ? `<div><strong>Действует до:</strong> ${expiresText}</div>` : ""}
       </div>
     `;
     accessConfigsList.appendChild(row);
@@ -951,8 +966,6 @@ function syncFreeAccessPanel() {
 
   const keyTitle = accessTitleByTier(info.tier);
   const keyValue = typeof info.keyValue === "string" && info.keyValue ? info.keyValue : null;
-  const configName = typeof info.configName === "string" && info.configName ? info.configName : "-";
-  const expiresText = formatDateTime(info.expiresAt);
   const accessSummary = configs.length > 1 ? `Доступ: ${keyTitle} • ${configs.length} конфигов` : `Доступ: ${keyTitle}`;
 
   freeAccessValue.classList.remove("tier-free", "tier-paid", "tier-blatnoy", "tier-universal");
@@ -971,19 +984,8 @@ function syncFreeAccessPanel() {
   freeAccessValue.disabled = true;
   freeAccessValue.title = "";
 
-  if (configs.length > 1) {
-    rewardStatus.textContent =
-      info.tier === "universal"
-        ? "Ниже перечислены все доступные конфиги и тарифы."
-        : "Ниже перечислены все доступные конфиги одного тарифа.";
-    rewardTimer.textContent =
-      info.tier === "universal"
-        ? "Универсальный доступ активен для нескольких тарифов."
-        : "Активно несколько конфигов, относящихся к одному тарифу.";
-  } else {
-    rewardStatus.textContent = `Ключ: ${keyValue || "-"}`;
-    rewardTimer.textContent = `Конфиг: ${configName}\nДействует до: ${expiresText}`;
-  }
+  rewardStatus.textContent = "";
+  rewardTimer.textContent = "";
   renderAccessConfigs(configs);
 }
 
@@ -1390,12 +1392,16 @@ function applyUserState(payload) {
   const accessInfo = payload.access_info || {};
   state.accessInfo = {
     tier: accessInfo.tier || "none",
-    keyTitle: accessInfo.key_title || "Нет доступа",
-    keyValue: accessInfo.key_value || null,
-    configName: accessInfo.config_name || null,
-    expiresAt: accessInfo.expires_at || null,
+    keyTitle: accessInfo.keyTitle || accessInfo.key_title || "Нет доступа",
+    keyValue: accessInfo.keyValue || accessInfo.key_value || null,
+    configName: accessInfo.configName || accessInfo.config_name || null,
+    expiresAt: accessInfo.expiresAt || accessInfo.expires_at || null,
   };
-  state.availableConfigs = Array.isArray(payload.available_configs) ? payload.available_configs : [];
+  state.availableConfigs = Array.isArray(payload.availableConfigs)
+    ? payload.availableConfigs
+    : Array.isArray(payload.available_configs)
+      ? payload.available_configs
+      : [];
 
   updateReferralStats();
   syncSubscription();

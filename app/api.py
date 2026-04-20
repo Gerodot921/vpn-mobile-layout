@@ -339,11 +339,11 @@ def _build_available_configs(
             {
                 "tier": "blatnoy",
                 "title": "Блатной",
-                "tariff_name": "Блатной",
-                "key_value": personal_record.get("config_id"),
-                "config_name": personal_record.get("config_filename"),
-                "expires_at": personal_record.get("expires_at"),
-                "access_source": "personal",
+                "tariffName": "Блатной",
+                "keyValue": personal_record.get("config_id"),
+                "configName": personal_record.get("config_filename"),
+                "expiresAt": personal_record.get("expires_at"),
+                "accessSource": "personal",
             }
         )
 
@@ -352,11 +352,11 @@ def _build_available_configs(
             {
                 "tier": "free",
                 "title": "Бесплатный",
-                "tariff_name": "Бесплатный доступ",
-                "key_value": free_record.get("access_key"),
-                "config_name": free_record.get("vpn_config_name"),
-                "expires_at": free_record.get("expires_at"),
-                "access_source": "free",
+                "tariffName": "Бесплатный доступ",
+                "keyValue": free_record.get("access_key"),
+                "configName": free_record.get("vpn_config_name"),
+                "expiresAt": free_record.get("expires_at"),
+                "accessSource": "free",
             }
         )
 
@@ -365,11 +365,11 @@ def _build_available_configs(
             {
                 "tier": "paid",
                 "title": "Платный",
-                "tariff_name": paid_record.get("plan_name", paid_plan_name),
-                "key_value": paid_record.get("plan_name", paid_plan_name),
-                "config_name": paid_record.get("plan_name", paid_plan_name),
-                "expires_at": paid_record.get("expires_at"),
-                "access_source": "subscription",
+                "tariffName": paid_record.get("plan_name", paid_plan_name),
+                "keyValue": paid_record.get("plan_name", paid_plan_name),
+                "configName": paid_record.get("plan_name", paid_plan_name),
+                "expiresAt": paid_record.get("expires_at"),
+                "accessSource": "subscription",
             }
         )
 
@@ -392,7 +392,7 @@ def _resolve_access_info(available_configs: list[dict[str, Any]]) -> dict[str, A
     if len(active_tiers) >= 2:
         primary = available_configs[0]
         latest_expires_at = max(
-            (str(item.get("expires_at")) for item in available_configs if isinstance(item.get("expires_at"), str) and item.get("expires_at")),
+            (str(item.get("expiresAt")) for item in available_configs if isinstance(item.get("expiresAt"), str) and item.get("expiresAt")),
             default=None,
         )
         return {
@@ -400,16 +400,16 @@ def _resolve_access_info(available_configs: list[dict[str, Any]]) -> dict[str, A
             "key_title": "Универсальный",
             "key_value": None,
             "config_name": f"{len(available_configs)} конфигов",
-            "expires_at": latest_expires_at or primary.get("expires_at"),
+            "expires_at": latest_expires_at or primary.get("expiresAt"),
         }
 
     primary = available_configs[0]
     return {
         "tier": primary.get("tier") or "none",
         "key_title": primary.get("title") or "Нет доступа",
-        "key_value": primary.get("key_value"),
-        "config_name": primary.get("config_name"),
-        "expires_at": primary.get("expires_at"),
+        "key_value": primary.get("keyValue"),
+        "config_name": primary.get("configName"),
+        "expires_at": primary.get("expiresAt"),
     }
 
 
