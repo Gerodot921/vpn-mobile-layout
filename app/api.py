@@ -96,9 +96,35 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
 DEFAULT_CRYPTO_TON_WALLET = "UQDNgjWaGw6Jau70YILv_MkiyiIkY24AVDrnfyAz9Pc4chca"
 OWNER_ID = int(os.getenv("OWNER_ID", "1041865849"))
 
+PLAN_CODE_ALIASES: dict[str, str] = {
+    # New canonical plans.
+    "basic": "basic",
+    "double": "double",
+    "trio": "trio",
+    "together": "together",
+    "family": "family",
+    # Legacy plan codes still accepted from cached clients.
+    "standard": "double",
+    "premium": "family",
+    # Cyrillic aliases from possible custom clients.
+    "базовый": "basic",
+    "двойня": "double",
+    "трио": "trio",
+    "вместе": "together",
+    "семейный": "family",
+}
+
+
+def _normalize_plan_code(plan_code: str) -> str:
+    if not isinstance(plan_code, str):
+        return ""
+    normalized = plan_code.strip().lower().replace("ё", "е")
+    normalized = " ".join(normalized.split())
+    return PLAN_CODE_ALIASES.get(normalized, normalized)
+
 
 def _resolve_payment_plan(plan_code: str) -> dict[str, Any] | None:
-    return PAYMENT_PLAN_CATALOG.get(plan_code)
+    return PAYMENT_PLAN_CATALOG.get(_normalize_plan_code(plan_code))
 
 
 def _build_template_payment_url(template: str, user_id: int, plan: dict[str, Any], method: str) -> str:
@@ -782,7 +808,7 @@ async def payment_create(request: web.Request) -> web.Response:
         user_id = int(user_data["id"])
 
         method = str(payload.get("method", "")).strip().lower()
-        plan_code = str(payload.get("planCode", "")).strip().lower()
+        plan_code = _normalize_plan_code(str(payload.get("planCode", "")))
         plan = _resolve_payment_plan(plan_code)
         if plan is None:
             return web.json_response({"ok": False, "error": "Unknown tariff plan"}, status=400)
