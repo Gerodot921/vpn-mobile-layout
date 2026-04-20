@@ -14,6 +14,7 @@ const installBtn = document.getElementById("installBtn");
 const freeAccessValue = document.getElementById("freeAccessValue");
 const rewardStatus = document.getElementById("rewardStatus");
 const rewardTimer = document.getElementById("rewardTimer");
+const accessConfigsList = document.getElementById("accessConfigsList");
 const rewardPanel = document.querySelector(".reward-panel");
 const adOverlay = document.getElementById("adOverlay");
 const adMedia = document.getElementById("adMedia");
@@ -218,6 +219,7 @@ const state = {
     configName: null,
     expiresAt: null,
   },
+  availableConfigs: [],
   rewardReadyAt: 0,
   referral: {
     referrerId: null,
@@ -581,6 +583,9 @@ function accessTitleByTier(tier) {
   if (tier === "blatnoy") {
     return "Блатной";
   }
+  if (tier === "universal") {
+    return "Универсальный";
+  }
   if (tier === "paid") {
     return "Платный";
   }
@@ -661,6 +666,46 @@ function renderServerList() {
 
   paidServers.forEach((server) => {
     renderServerCard(server, serverConfigs.indexOf(server), paidServerList, !hasPaidAccess());
+  });
+}
+
+
+function renderAccessConfigs(accessConfigs) {
+  if (!accessConfigsList) {
+    return;
+  }
+
+  accessConfigsList.innerHTML = "";
+  const configs = Array.isArray(accessConfigs) ? accessConfigs : [];
+  if (configs.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "access-config-empty";
+    empty.textContent = "Нет доступных конфигов";
+    accessConfigsList.appendChild(empty);
+    return;
+  }
+
+  configs.forEach((item) => {
+    const tier = typeof item?.tier === "string" ? item.tier : "none";
+    const title = typeof item?.title === "string" && item.title ? item.title : accessTitleByTier(tier);
+    const tariffName = typeof item?.tariffName === "string" && item.tariffName ? item.tariffName : title;
+    const configName = typeof item?.configName === "string" && item.configName ? item.configName : "-";
+    const keyValue = typeof item?.keyValue === "string" && item.keyValue ? item.keyValue : "-";
+    const expiresText = formatDateTime(item?.expiresAt);
+    const row = document.createElement("div");
+    row.className = `access-config-item tier-${tier}`;
+    row.innerHTML = `
+      <div class="access-config-top">
+        <span class="access-config-title">${title}</span>
+        <span class="access-config-badge">${tariffName}</span>
+      </div>
+      <div class="access-config-meta">
+        <div><strong>Конфиг:</strong> ${configName}</div>
+        <div><strong>Ключ:</strong> ${keyValue}</div>
+        <div><strong>Действует до:</strong> ${expiresText}</div>
+      </div>
+    `;
+    accessConfigsList.appendChild(row);
   });
 }
 
@@ -895,6 +940,7 @@ function syncFreeAccessPanel() {
   const now = Date.now();
   const accessRemaining = state.freeAccessUntil - now;
   const info = state.accessInfo || {};
+  const configs = Array.isArray(state.availableConfigs) ? state.availableConfigs : [];
   const hasAnyActiveAccess =
     (typeof info.tier === "string" && info.tier !== "none") || accessRemaining > 0 || hasPaidAccess();
 
@@ -907,27 +953,38 @@ function syncFreeAccessPanel() {
   const keyValue = typeof info.keyValue === "string" && info.keyValue ? info.keyValue : null;
   const configName = typeof info.configName === "string" && info.configName ? info.configName : "-";
   const expiresText = formatDateTime(info.expiresAt);
+  const accessSummary = configs.length > 1 ? `Доступ: ${keyTitle} • ${configs.length} конфигов` : `Доступ: ${keyTitle}`;
 
-  freeAccessValue.classList.remove("tier-free", "tier-paid", "tier-blatnoy");
+  freeAccessValue.classList.remove("tier-free", "tier-paid", "tier-blatnoy", "tier-universal");
   if (info.tier === "free") {
     freeAccessValue.classList.add("tier-free");
   } else if (info.tier === "paid") {
     freeAccessValue.classList.add("tier-paid");
   } else if (info.tier === "blatnoy") {
     freeAccessValue.classList.add("tier-blatnoy");
+  } else if (info.tier === "universal") {
+    freeAccessValue.classList.add("tier-universal");
   }
 
-  if (keyValue) {
-    freeAccessValue.textContent = `Доступ: ${keyTitle}`;
-  } else {
-    freeAccessValue.textContent = `Доступ: ${keyTitle}`;
-  }
+  freeAccessValue.textContent = accessSummary;
   freeAccessValue.classList.remove("copyable");
   freeAccessValue.disabled = true;
   freeAccessValue.title = "";
 
-  rewardStatus.textContent = `Ключ: ${keyValue || "-"}`;
-  rewardTimer.textContent = `Конфиг: ${configName}\nДействует до: ${expiresText}`;
+  if (configs.length > 1) {
+    rewardStatus.textContent =
+      info.tier === "universal"
+        ? "Ниже перечислены все доступные конфиги и тарифы."
+        : "Ниже перечислены все доступные конфиги одного тарифа.";
+    rewardTimer.textContent =
+      info.tier === "universal"
+        ? "Универсальный доступ активен для нескольких тарифов."
+        : "Активно несколько конфигов, относящихся к одному тарифу.";
+  } else {
+    rewardStatus.textContent = `Ключ: ${keyValue || "-"}`;
+    rewardTimer.textContent = `Конфиг: ${configName}\nДействует до: ${expiresText}`;
+  }
+  renderAccessConfigs(configs);
 }
 
 
@@ -1338,6 +1395,7 @@ function applyUserState(payload) {
     configName: accessInfo.config_name || null,
     expiresAt: accessInfo.expires_at || null,
   };
+  state.availableConfigs = Array.isArray(payload.available_configs) ? payload.available_configs : [];
 
   updateReferralStats();
   syncSubscription();

@@ -115,6 +115,65 @@ body {
   white-space: pre-line;
 }
 
+.access-configs {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.access-config-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(15, 28, 48, 0.86);
+  padding: 10px 12px;
+}
+
+.access-config-item.tier-universal {
+  border-color: rgba(36, 165, 255, 0.55);
+  background: linear-gradient(180deg, rgba(20, 40, 67, 0.96), rgba(13, 24, 41, 0.9));
+}
+
+.access-config-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.access-config-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.access-config-badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #b8dcff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.access-config-meta {
+  margin-top: 8px;
+  display: grid;
+  gap: 4px;
+  color: #a9c8ea;
+  font-size: 12px;
+}
+
+.access-config-meta strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.access-config-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .panel h2 {
   margin: 0 0 10px;
   font-size: 16px;
@@ -424,6 +483,11 @@ body {
 .reward-panel .value-inline.tier-blatnoy {
   border-color: rgba(255, 215, 106, 0.6);
   background: rgba(255, 215, 106, 0.18);
+}
+
+.reward-panel .value-inline.tier-universal {
+  border-color: rgba(0, 211, 167, 0.55);
+  background: linear-gradient(90deg, rgba(0, 211, 167, 0.16), rgba(36, 165, 255, 0.16));
 }
 
 .value-inline.copyable {

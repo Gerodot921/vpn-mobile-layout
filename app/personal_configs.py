@@ -580,3 +580,13 @@ def list_active_personal_configs() -> list[PersonalConfigRecord]:
             continue
         active.append(record)
     return active
+
+
+def list_active_personal_configs_for_user(user_id: int) -> list[PersonalConfigRecord]:
+    active: list[PersonalConfigRecord] = []
+    for record in list_active_personal_configs():
+        if record.get("assigned_user_id") != user_id:
+            continue
+        active.append(record)
+    active.sort(key=lambda item: item.get("expires_at", ""), reverse=True)
+    return active

@@ -30,7 +30,7 @@ from app.free_access import (
     mark_free_access_peer_added,
 )
 from app.referrals import ensure_user, get_referral_invites, upsert_username
-from app.personal_configs import get_active_personal_config_for_user
+from app.personal_configs import list_active_personal_configs_for_user
 from app.payment_webhooks import log_payment_webhook_event
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.wireguard import ensure_wireguard_profile
@@ -326,6 +326,93 @@ def _init_data_from_payload(payload: dict[str, Any]) -> str:
     raise web.HTTPBadRequest(text="initData is required")
 
 
+def _build_available_configs(
+    user_id: int,
+    free_record: dict[str, Any] | None,
+    paid_record: dict[str, Any] | None,
+    paid_plan_name: str,
+) -> list[dict[str, Any]]:
+    configs: list[dict[str, Any]] = []
+
+    for personal_record in list_active_personal_configs_for_user(user_id):
+        configs.append(
+            {
+                "tier": "blatnoy",
+                "title": "Блатной",
+                "tariff_name": "Блатной",
+                "key_value": personal_record.get("config_id"),
+                "config_name": personal_record.get("config_filename"),
+                "expires_at": personal_record.get("expires_at"),
+                "access_source": "personal",
+            }
+        )
+
+    if isinstance(free_record, dict):
+        configs.append(
+            {
+                "tier": "free",
+                "title": "Бесплатный",
+                "tariff_name": "Бесплатный доступ",
+                "key_value": free_record.get("access_key"),
+                "config_name": free_record.get("vpn_config_name"),
+                "expires_at": free_record.get("expires_at"),
+                "access_source": "free",
+            }
+        )
+
+    if isinstance(paid_record, dict):
+        configs.append(
+            {
+                "tier": "paid",
+                "title": "Платный",
+                "tariff_name": paid_record.get("plan_name", paid_plan_name),
+                "key_value": paid_record.get("plan_name", paid_plan_name),
+                "config_name": paid_record.get("plan_name", paid_plan_name),
+                "expires_at": paid_record.get("expires_at"),
+                "access_source": "subscription",
+            }
+        )
+
+    return configs
+
+
+def _resolve_access_info(available_configs: list[dict[str, Any]]) -> dict[str, Any]:
+    if not available_configs:
+        return {
+            "tier": "none",
+            "key_title": "Нет доступа",
+            "key_value": None,
+            "config_name": None,
+            "expires_at": None,
+        }
+
+    active_tiers = {str(item.get("tier") or "") for item in available_configs if isinstance(item, dict)}
+    active_tiers.discard("")
+
+    if len(active_tiers) >= 2:
+        primary = available_configs[0]
+        latest_expires_at = max(
+            (str(item.get("expires_at")) for item in available_configs if isinstance(item.get("expires_at"), str) and item.get("expires_at")),
+            default=None,
+        )
+        return {
+            "tier": "universal",
+            "key_title": "Универсальный",
+            "key_value": None,
+            "config_name": f"{len(available_configs)} конфигов",
+            "expires_at": latest_expires_at or primary.get("expires_at"),
+        }
+
+    primary = available_configs[0]
+    return {
+        "tier": primary.get("tier") or "none",
+        "key_title": primary.get("title") or "Нет доступа",
+        "key_value": primary.get("key_value"),
+        "config_name": primary.get("config_name"),
+        "expires_at": primary.get("expires_at"),
+    }
+
+
 def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
     user_id = int(user_data["id"])
     referral = ensure_user(user_id, user_data.get("username"))
@@ -335,43 +422,15 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
     paid_plan_name = get_subscription_plan_name(user_id)
     paid_record = get_subscription_record(user_id)
     paid_active = is_subscription_active(user_id)
-    personal_record = get_active_personal_config_for_user(user_id)
-
     free_active = is_free_access_active(user_id)
     free_remaining = format_free_access_remaining_text(user_id) if free_active else "0"
-
-    access_info: dict[str, Any] = {
-        "tier": "none",
-        "key_title": "Нет доступа",
-        "key_value": None,
-        "config_name": None,
-        "expires_at": None,
-    }
-
-    if personal_record is not None:
-        access_info = {
-            "tier": "blatnoy",
-            "key_title": "Блатной",
-            "key_value": personal_record.get("config_id"),
-            "config_name": personal_record.get("config_filename"),
-            "expires_at": personal_record.get("expires_at"),
-        }
-    elif free_active and free_record is not None:
-        access_info = {
-            "tier": "free",
-            "key_title": "Бесплатный",
-            "key_value": free_record.get("access_key"),
-            "config_name": free_record.get("vpn_config_name"),
-            "expires_at": free_record.get("expires_at"),
-        }
-    elif paid_active and paid_record is not None:
-        access_info = {
-            "tier": "paid",
-            "key_title": "Платный",
-            "key_value": paid_record.get("plan_name", paid_plan_name),
-            "config_name": "paid-subscription",
-            "expires_at": paid_record.get("expires_at"),
-        }
+    available_configs = _build_available_configs(
+        user_id,
+        free_record if free_active else None,
+        paid_record if paid_active else None,
+        paid_plan_name,
+    )
+    access_info = _resolve_access_info(available_configs)
 
     return {
         "ok": True,
@@ -406,6 +465,7 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
             "active": paid_active,
         },
         "access_info": access_info,
+        "available_configs": available_configs,
     }
 
 
@@ -490,6 +550,13 @@ async def claim_free_access(request: web.Request) -> web.Response:
             logging.error("/api/claim-free-access produced empty record for user_id=%s", user_id)
             return web.json_response({"ok": False, "error": "Unable to provision free access"}, status=500)
 
+        available_configs = _build_available_configs(
+            user_id,
+            record,
+            None,
+            "Базовый",
+        )
+
         # Ensure peer is added to server only once per free access slot
         peer_added = record.get("peer_added_to_server", False) if record else False
         if not peer_added and record:
@@ -537,13 +604,8 @@ async def claim_free_access(request: web.Request) -> web.Response:
                     "expires_at": None,
                     "active": False,
                 },
-                "access_info": {
-                    "tier": "free",
-                    "key_title": "Бесплатный",
-                    "key_value": record.get("access_key"),
-                    "config_name": record.get("vpn_config_name"),
-                    "expires_at": record.get("expires_at"),
-                },
+                "access_info": _resolve_access_info(available_configs),
+                "available_configs": available_configs,
             }
 
         response_payload["claim"] = {
