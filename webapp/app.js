@@ -257,7 +257,7 @@ const tariffPlans = [
     durationDays: 30,
     duration: "1 месяц",
     keys: "1 устройство",
-    note: "На старте скидка 25%",
+    note: "Для себя",
   },
   {
     code: "double",
@@ -269,7 +269,7 @@ const tariffPlans = [
     durationDays: 30,
     duration: "1 месяц",
     keys: "2 устройства",
-    note: "На старте скидка 20%",
+    note: "Для пары",
   },
   {
     code: "trio",
@@ -281,7 +281,7 @@ const tariffPlans = [
     durationDays: 30,
     duration: "1 месяц",
     keys: "3 устройства",
-    note: "На старте скидка 15%",
+    note: "Для семьи 3",
   },
   {
     code: "together",
@@ -293,7 +293,7 @@ const tariffPlans = [
     durationDays: 30,
     duration: "1 месяц",
     keys: "4 устройства",
-    note: "На старте скидка 10%",
+    note: "Для семьи 4",
   },
   {
     code: "family",
@@ -305,7 +305,7 @@ const tariffPlans = [
     durationDays: 30,
     duration: "1 месяц",
     keys: "5 устройств",
-    note: "На старте скидка 10%",
+    note: "Для семьи 5",
   },
 ];
 
@@ -1500,7 +1500,7 @@ function renderTariffList() {
         <span class="tariff-price-new">${formatRub(plan.priceRub)} ₽</span>
       </div>
       <p class="tariff-meta">${plan.keys} • ${plan.duration}</p>
-      <p class="tariff-note">${plan.note} • ${plan.stars} ⭐</p>
+      <p class="tariff-note">${plan.note}</p>
     `;
 
     item.addEventListener("click", () => {
