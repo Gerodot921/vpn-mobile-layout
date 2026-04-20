@@ -1212,8 +1212,6 @@ async function startFreeServerAdFlow(server) {
 
     showAdOverlay(ad, state.adWatchSeconds);
 
-    showToast(`Реклама запущена на ${state.adWatchSeconds} секунд`);
-
     window.setTimeout(async () => {
       try {
         await completeAdSession();
