@@ -25,8 +25,10 @@ DB_LOCK_RETRY_BASE_DELAY_SECONDS = 0.25
 
 _state_lock = Lock()
 _schema_lock = Lock()
+_db_connection_lock = Lock()
 _schema_checked = False
 _seed_checked = False
+_db_connection: sqlite3.Connection | None = None
 
 
 class Ad(TypedDict):
@@ -72,12 +74,23 @@ def _connect() -> sqlite3.Connection:
 
 
 def _open_connection() -> sqlite3.Connection:
-    STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA synchronous=NORMAL")
-    connection.execute("PRAGMA busy_timeout=20000")
-    return connection
+    global _db_connection
+
+    with _db_connection_lock:
+        if _db_connection is not None:
+            try:
+                _db_connection.execute("SELECT 1")
+                return _db_connection
+            except Exception:
+                _db_connection = None
+
+        STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20, check_same_thread=False)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA busy_timeout=20000")
+        _db_connection = connection
+        return connection
 
 
 def _ensure_schema() -> None:
