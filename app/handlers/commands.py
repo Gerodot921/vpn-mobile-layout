@@ -215,7 +215,7 @@ def _build_admin_help_lines() -> list[str]:
         "/allstat — общая статистика по всем типам",
         "/create <n> <m> — создать n персональных конфигов на m дней",
         "/delete <config_id> — удалить персональный конфиг по ID",
-        "/addtarif <username> <tariff> — выдать тариф (free|blatnoy|paid/basic/double/trio/together/family)",
+        "/addtarif <username> <tariff> — выдать тариф пользователю",
         "/deletetarif <username> <free|blatnoy|paid> — удалить тариф и его конфиг",
         "/adset <asset_url> [seconds] [click_url] — установить рекламу",
         "/adon — включить рекламу",
