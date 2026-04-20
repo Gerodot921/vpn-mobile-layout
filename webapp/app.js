@@ -912,10 +912,16 @@ function closePaymentModal() {
 }
 
 
-async function requestPayment(planCode, method) {
+async function requestPayment(planCode, method, planName) {
   if (!tg?.initData) {
     throw new Error("Откройте Mini App внутри Telegram");
   }
+
+  const normalizedCode =
+    typeof planCode === "string" && planCode.trim()
+      ? planCode.trim().toLowerCase()
+      : "basic";
+  const normalizedName = typeof planName === "string" ? planName.trim() : "";
 
   const response = await fetch("/api/payment/create", {
     method: "POST",
@@ -924,7 +930,8 @@ async function requestPayment(planCode, method) {
     },
     body: JSON.stringify({
       initData: tg.initData,
-      planCode,
+      planCode: normalizedCode,
+      planName: normalizedName,
       method,
     }),
   });
@@ -1682,7 +1689,7 @@ freeAccessValue.addEventListener("click", async () => {
 });
 
 async function startPaymentForSelectedMethod() {
-  const selected = currentTariff();
+  const selected = currentTariff() || tariffPlans[0];
   const method = selectedPaymentMethod();
 
   if (subscriptionBtn) {
@@ -1696,7 +1703,7 @@ async function startPaymentForSelectedMethod() {
   }
 
   try {
-    const paymentData = await requestPayment(selected.code, method.code);
+    const paymentData = await requestPayment(selected.code, method.code, selected.name);
 
     if (method.code === "telegram_stars") {
       const invoiceUrl = paymentData?.invoice_url || "";

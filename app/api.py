@@ -114,6 +114,17 @@ PLAN_CODE_ALIASES: dict[str, str] = {
     "семейный": "family",
 }
 
+PLAN_NAME_ALIASES: dict[str, str] = {
+    "базовый": "basic",
+    "двойня": "double",
+    "трио": "trio",
+    "вместе": "together",
+    "семейный": "family",
+    # Legacy names.
+    "стандарт": "double",
+    "премиум": "family",
+}
+
 
 def _normalize_plan_code(plan_code: str) -> str:
     if not isinstance(plan_code, str):
@@ -123,8 +134,42 @@ def _normalize_plan_code(plan_code: str) -> str:
     return PLAN_CODE_ALIASES.get(normalized, normalized)
 
 
+def _normalize_plan_name(plan_name: str) -> str:
+    if not isinstance(plan_name, str):
+        return ""
+    normalized = plan_name.strip().lower().replace("ё", "е")
+    normalized = " ".join(normalized.split())
+    return PLAN_NAME_ALIASES.get(normalized, normalized)
+
+
 def _resolve_payment_plan(plan_code: str) -> dict[str, Any] | None:
     return PAYMENT_PLAN_CATALOG.get(_normalize_plan_code(plan_code))
+
+
+def _resolve_payment_plan_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    raw_plan_code = str(payload.get("planCode", ""))
+    normalized_code = _normalize_plan_code(raw_plan_code)
+    plan = _resolve_payment_plan(normalized_code)
+    if plan is not None:
+        return plan, normalized_code
+
+    for key in ("planName", "plan_name", "tariffName", "tariff_name", "plan"):
+        raw_name = payload.get(key)
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            continue
+        normalized_name = _normalize_plan_name(raw_name)
+        by_alias = _resolve_payment_plan(normalized_name)
+        if by_alias is not None:
+            return by_alias, normalized_name
+
+        for code, item in PAYMENT_PLAN_CATALOG.items():
+            item_name = item.get("name")
+            if not isinstance(item_name, str):
+                continue
+            if _normalize_plan_name(item_name) == normalized_name:
+                return item, code
+
+    return None, normalized_code
 
 
 def _build_template_payment_url(template: str, user_id: int, plan: dict[str, Any], method: str) -> str:
@@ -808,9 +853,9 @@ async def payment_create(request: web.Request) -> web.Response:
         user_id = int(user_data["id"])
 
         method = str(payload.get("method", "")).strip().lower()
-        plan_code = _normalize_plan_code(str(payload.get("planCode", "")))
-        plan = _resolve_payment_plan(plan_code)
+        plan, resolved_plan_code = _resolve_payment_plan_from_payload(payload)
         if plan is None:
+            logging.warning("Unknown tariff plan payload: planCode=%r planName=%r", payload.get("planCode"), payload.get("planName"))
             return web.json_response({"ok": False, "error": "Unknown tariff plan"}, status=400)
 
         if method == "telegram_stars":
@@ -832,6 +877,7 @@ async def payment_create(request: web.Request) -> web.Response:
                     "ok": True,
                     "method": method,
                     "plan": plan,
+                    "plan_code": resolved_plan_code,
                     "invoice_url": invoice_link,
                 }
             )
@@ -857,6 +903,7 @@ async def payment_create(request: web.Request) -> web.Response:
                     "ok": True,
                     "method": method,
                     "plan": plan,
+                    "plan_code": resolved_plan_code,
                     "payment_url": payment_url,
                 }
             )
