@@ -963,6 +963,42 @@ function renderAdCountdown(remainingSeconds) {
 }
 
 
+function cacheBustedAssetUrl(url) {
+  if (typeof url !== "string") {
+    return "";
+  }
+  const clean = url.trim();
+  if (!clean) {
+    return "";
+  }
+  if (!/^https?:\/\//i.test(clean)) {
+    return clean;
+  }
+
+  const delimiter = clean.includes("?") ? "&" : "?";
+  return `${clean}${delimiter}v=${Date.now()}`;
+}
+
+
+function showAdOverlayLoading(watchSeconds) {
+  if (!adOverlay || !adCaption || !adTimerText || !adMedia) {
+    return;
+  }
+
+  clearAdCountdownTimer();
+  const totalSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0 ? watchSeconds : REWARD_WATCH_SECONDS;
+  adCaption.textContent = "Загружаем рекламу...";
+  adMedia.removeAttribute("src");
+  adMedia.onclick = null;
+  adMedia.style.cursor = "default";
+  adCaption.onclick = null;
+  adCaption.style.cursor = "default";
+  renderAdCountdown(totalSeconds);
+  adOverlay.classList.remove("hidden");
+  adOverlay.setAttribute("aria-hidden", "false");
+}
+
+
 function showAdOverlay(ad, watchSeconds) {
   if (!adOverlay || !adMedia || !adCaption || !adTimerText) {
     return;
@@ -970,7 +1006,7 @@ function showAdOverlay(ad, watchSeconds) {
 
   clearAdCountdownTimer();
   const imageUrlRaw = typeof ad?.asset_url === "string" ? ad.asset_url : "";
-  const imageUrl = imageUrlRaw || REWARD_AD_URL || DEFAULT_REWARD_AD_ASSET_URL;
+  const imageUrl = cacheBustedAssetUrl(imageUrlRaw || REWARD_AD_URL || DEFAULT_REWARD_AD_ASSET_URL);
   const clickUrl = typeof ad?.click_url === "string" ? ad.click_url.trim() : "";
   const totalSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0 ? watchSeconds : REWARD_WATCH_SECONDS;
 
@@ -1022,6 +1058,7 @@ async function requestAdSession() {
 
   const response = await fetch("/api/ad/start", {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
     },
@@ -1136,7 +1173,7 @@ async function startFreeServerAdFlow(server) {
   try {
     // Open overlay immediately so user always sees ad window feedback.
     state.adWatchSeconds = REWARD_WATCH_SECONDS;
-    showAdOverlay({ asset_url: REWARD_AD_URL || DEFAULT_REWARD_AD_ASSET_URL }, state.adWatchSeconds);
+    showAdOverlayLoading(state.adWatchSeconds);
 
     const data = await requestAdSession();
     const ad = data?.ad || {};
@@ -1186,6 +1223,11 @@ async function startFreeServerAdFlow(server) {
               break;
             }
             await new Promise((resolve) => window.setTimeout(resolve, 700));
+          }
+
+          if (!hasFreeAccess()) {
+            // Fallback: if WebApp.sendData path didn't issue access, claim via API.
+            accessData = await requestFreeAccess();
           }
         }
 
