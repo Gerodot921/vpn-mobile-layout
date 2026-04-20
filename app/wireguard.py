@@ -16,7 +16,7 @@ from typing import Any, TypedDict
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import STORAGE_DB_PATH, load_json_file
+from app.json_storage import STORAGE_DB_PATH, get_storage_connection, load_json_file
 
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
 WIREGUARD_STATE_TABLE = "wireguard_state"
@@ -61,11 +61,7 @@ def _now_utc() -> datetime:
 
 
 def _connect() -> sqlite3.Connection:
-    STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA synchronous=NORMAL")
-    connection.execute("PRAGMA busy_timeout=20000")
+    connection = get_storage_connection()
     connection.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {WIREGUARD_STATE_TABLE} (

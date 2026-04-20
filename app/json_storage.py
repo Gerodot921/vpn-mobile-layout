@@ -10,6 +10,8 @@ from typing import Any
 
 STORAGE_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "storage.sqlite3"
 _state_lock = Lock()
+_connection_lock = Lock()
+_connection: sqlite3.Connection | None = None
 
 
 def _now_iso() -> str:
@@ -21,8 +23,22 @@ def _normalize_key(path: Path) -> str:
 
 
 def _connect() -> sqlite3.Connection:
+    return get_storage_connection()
+
+
+def get_storage_connection() -> sqlite3.Connection:
+    global _connection
+
+    with _connection_lock:
+        if _connection is not None:
+            try:
+                _connection.execute("SELECT 1")
+                return _connection
+            except Exception:
+                _connection = None
+
     STORAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20)
+    connection = sqlite3.connect(STORAGE_DB_PATH, timeout=20, check_same_thread=False)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
     connection.execute("PRAGMA busy_timeout=20000")
@@ -35,6 +51,7 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    _connection = connection
     return connection
 
 
