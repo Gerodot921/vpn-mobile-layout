@@ -1150,6 +1150,25 @@ async function requestFreeAccess() {
 }
 
 
+async function requestFreeAccessWithRetry(maxAttempts = 3) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await requestFreeAccess();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts) {
+        break;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 600 * attempt));
+    }
+  }
+
+  throw lastError || new Error("Не удалось получить доступ");
+}
+
+
 function submitFreeAccessRequest(hours = 1) {
   if (!tg?.sendData) {
     return false;
@@ -1200,54 +1219,29 @@ async function startFreeServerAdFlow(server) {
         state.rewardReadyAt = 0;
         saveRewardTimerState();
 
+        // Main grant path: always via API for deterministic state update in Mini App.
+        const accessData = await requestFreeAccessWithRetry(3);
+
+        // Supplemental chat notification path (non-blocking).
         const submittedViaChat = submitFreeAccessRequest(1);
-        if (submittedViaChat) {
-          showToast("Реклама просмотрена. Доступ и конфиг отправлены в чат.");
-        }
-
-        let accessData = null;
-        if (!submittedViaChat) {
-          try {
-            accessData = await requestFreeAccess();
-          } catch (claimError) {
-            // Sometimes access is already granted even if claim endpoint returns a transient error.
-            await loadUserState();
-            if (!hasFreeAccess()) {
-              throw claimError;
-            }
-          }
-        } else {
-          for (let attempt = 0; attempt < 5; attempt += 1) {
-            await loadUserState();
-            if (hasFreeAccess()) {
-              break;
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 700));
-          }
-
-          if (!hasFreeAccess()) {
-            // Fallback: if WebApp.sendData path didn't issue access, claim via API.
-            accessData = await requestFreeAccess();
-          }
-        }
 
         state.adSessionToken = null;
         state.adSessionStartedAtMs = 0;
         state.adWatchSeconds = REWARD_WATCH_SECONDS;
         state.adAssetUrl = "";
         state.adClickUrl = "";
-        if (accessData) {
-          applyUserState(accessData);
-        }
+        applyUserState(accessData);
 
         state.serverIndex = serverConfigs.indexOf(server);
         updateServerView();
         renderServerList();
 
         hideAdOverlay();
-        if (!submittedViaChat) {
-          showToast("Успешный просмотр рекламы, вам выдан доступ к VPN на 1 час. Мы выслали вам в личные сообщения доступ к SkullVPN.");
-        }
+        showToast(
+          submittedViaChat
+            ? "Реклама просмотрена. Доступ выдан, конфиг отправлен в чат."
+            : "Реклама просмотрена. Доступ выдан на 1 час, конфиг отправлен в личные сообщения."
+        );
       } catch (error) {
         const message = error?.message || "Не удалось выдать доступ после рекламы";
         showToast(message);
