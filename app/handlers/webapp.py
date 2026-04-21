@@ -57,18 +57,26 @@ async def webapp_data(message: Message) -> None:
         return
 
     hours_value = payload.get("hours", DEFAULT_FREE_ACCESS_HOURS)
+    extend_requested = bool(payload.get("extend", False))
     try:
         hours = int(hours_value)
     except Exception:
         hours = DEFAULT_FREE_ACCESS_HOURS
 
-    record, created = grant_free_access(user_id, hours=hours)
+    record, created = grant_free_access(user_id, hours=hours, extend_from_current=extend_requested)
     remaining_text = format_free_access_remaining_text(user_id)
     ensure_wireguard_profile(user_id)
 
+    intro_text = (
+        "✅ Реклама просмотрена, доступ продлён на 1 час.\n"
+        "Конфиг и сообщение с данными отправляю ниже в этот чат."
+        if extend_requested
+        else "✅ Реклама просмотрена, доступ выдан на 1 час.\n"
+        "Конфиг и сообщение с данными отправляю ниже в этот чат."
+    )
+
     await message.answer(
-        "✅ Реклама просмотрена, доступ выдан на 1 час.\n"
-        "Конфиг и сообщение с данными отправляю ниже в этот чат.",
+        intro_text,
         disable_web_page_preview=True,
     )
 

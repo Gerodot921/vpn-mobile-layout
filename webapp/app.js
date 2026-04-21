@@ -14,6 +14,7 @@ const installBtn = document.getElementById("installBtn");
 const freeAccessValue = document.getElementById("freeAccessValue");
 const rewardStatus = document.getElementById("rewardStatus");
 const rewardTimer = document.getElementById("rewardTimer");
+const freeAccessExtendBtn = document.getElementById("freeAccessExtendBtn");
 const accessConfigsList = document.getElementById("accessConfigsList");
 const rewardPanel = document.querySelector(".reward-panel");
 const adOverlay = document.getElementById("adOverlay");
@@ -333,6 +334,16 @@ function hasPaidAccess() {
 
 function hasFreeAccess() {
   return state.freeAccessUntil > Date.now();
+}
+
+
+function freeAccessRemainingMs() {
+  return Math.max(0, state.freeAccessUntil - Date.now());
+}
+
+
+function isFreeAccessRenewalAvailable() {
+  return hasFreeAccess() && freeAccessRemainingMs() <= 5 * 60 * 1000;
 }
 
 
@@ -1015,6 +1026,17 @@ function syncFreeAccessPanel() {
   freeAccessValue.disabled = true;
   freeAccessValue.title = "";
 
+  if (freeAccessExtendBtn) {
+    const renewalAvailable = isFreeAccessRenewalAvailable();
+    freeAccessExtendBtn.classList.toggle("hidden", !renewalAvailable);
+    freeAccessExtendBtn.disabled = !renewalAvailable || freeServerAdInProgress;
+    if (renewalAvailable) {
+      freeAccessExtendBtn.textContent = `🎁 Продлить на 1 час за рекламу • осталось ${formatDurationShort(freeAccessRemainingMs())}`;
+    } else {
+      freeAccessExtendBtn.textContent = "🎁 Продлить на 1 час за рекламу";
+    }
+  }
+
   rewardStatus.textContent = "";
   rewardTimer.textContent = "";
   renderAccessConfigs(configs);
@@ -1219,7 +1241,7 @@ async function trackAdClick() {
 }
 
 
-async function requestFreeAccess() {
+async function requestFreeAccess(extend = false) {
   if (!tg?.initData) {
     throw new Error("Откройте Mini App внутри Telegram");
   }
@@ -1229,7 +1251,7 @@ async function requestFreeAccess() {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ initData: tg.initData }),
+    body: JSON.stringify({ initData: tg.initData, extend }),
   });
 
   const data = await response.json().catch(() => ({}));
@@ -1241,12 +1263,12 @@ async function requestFreeAccess() {
 }
 
 
-async function requestFreeAccessWithRetry(maxAttempts = 3) {
+async function requestFreeAccessWithRetry(maxAttempts = 3, extend = false) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await requestFreeAccess();
+      return await requestFreeAccess(extend);
     } catch (error) {
       lastError = error;
       if (attempt >= maxAttempts) {
@@ -1260,7 +1282,7 @@ async function requestFreeAccessWithRetry(maxAttempts = 3) {
 }
 
 
-function submitFreeAccessRequest(hours = 1) {
+function submitFreeAccessRequest(hours = 1, extend = false) {
   if (!tg?.sendData) {
     return false;
   }
@@ -1268,8 +1290,79 @@ function submitFreeAccessRequest(hours = 1) {
   tg.sendData(JSON.stringify({
     action: "claim_free_access",
     hours,
+    extend,
   }));
   return true;
+}
+
+
+async function startFreeAccessRenewalFlow() {
+  if (freeServerAdInProgress) {
+    showToast("Реклама уже запущена, дождитесь окончания");
+    return;
+  }
+
+  freeServerAdInProgress = true;
+  try {
+    state.adWatchSeconds = REWARD_WATCH_SECONDS;
+    showAdOverlayLoading(state.adWatchSeconds);
+
+    const data = await requestAdSession();
+    const ad = data?.ad || {};
+    const watchSeconds = Number(ad.duration_sec || REWARD_WATCH_SECONDS);
+
+    state.adSessionToken = data?.session_token || null;
+    state.adSessionStartedAtMs = Date.now();
+    state.adWatchSeconds = Number.isFinite(watchSeconds) && watchSeconds > 0
+      ? watchSeconds
+      : REWARD_WATCH_SECONDS;
+    state.adAssetUrl = typeof ad.asset_url === "string" ? ad.asset_url : "";
+    state.adClickUrl = typeof ad.click_url === "string" ? ad.click_url : "";
+    state.rewardReadyAt = Date.now() + state.adWatchSeconds * 1000;
+    saveRewardTimerState();
+    syncFreeAccessPanel();
+
+    showAdOverlay(ad, state.adWatchSeconds);
+
+    window.setTimeout(async () => {
+      try {
+        await completeAdSession();
+        state.rewardReadyAt = 0;
+        saveRewardTimerState();
+
+        const accessData = await requestFreeAccessWithRetry(3, true);
+        const submittedViaChat = submitFreeAccessRequest(1, true);
+
+        state.adSessionToken = null;
+        state.adSessionStartedAtMs = 0;
+        state.adWatchSeconds = REWARD_WATCH_SECONDS;
+        state.adAssetUrl = "";
+        state.adClickUrl = "";
+        applyUserState(accessData);
+
+        hideAdOverlay();
+        showToast(
+          submittedViaChat
+            ? "Реклама просмотрена. Доступ продлён на 1 час, конфиг отправлен в чат."
+            : "Реклама просмотрена. Доступ продлён на 1 час, конфиг отправлен в личные сообщения."
+        );
+      } catch (error) {
+        const message = error?.message || "Не удалось продлить доступ после рекламы";
+        showToast(message);
+      } finally {
+        freeServerAdInProgress = false;
+        syncFreeAccessPanel();
+      }
+    }, (state.adWatchSeconds + 1) * 1000);
+  } catch (error) {
+    freeServerAdInProgress = false;
+    state.adSessionStartedAtMs = 0;
+    state.rewardReadyAt = 0;
+    saveRewardTimerState();
+    hideAdOverlay();
+    syncFreeAccessPanel();
+    showToast(error?.message || "Не удалось запустить рекламу");
+  }
 }
 
 
@@ -1653,6 +1746,9 @@ function bootstrapFromTelegram() {
 connectBtn.addEventListener("click", handleConnectClick);
 openAgainBtn.addEventListener("click", tryOpenAmnezia);
 checkBtn.addEventListener("click", verifyConnection);
+freeAccessExtendBtn?.addEventListener("click", () => {
+  void startFreeAccessRenewalFlow();
+});
 
 disconnectBtn.addEventListener("click", () => {
   showToast("Откройте Amnezia и отключите профиль вручную");

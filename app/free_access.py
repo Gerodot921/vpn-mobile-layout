@@ -420,6 +420,7 @@ def grant_free_access(
     hours: int | None = None,
     source: str = "mini_app_ad",
     force_extend: bool = False,
+    extend_from_current: bool = False,
 ) -> tuple[FreeAccessRecord, bool]:
     """Grant free access to a user.
     
@@ -441,9 +442,25 @@ def grant_free_access(
         if current is not None:
             try:
                 current_expires_at = _parse_dt(current["expires_at"])
-                if current_expires_at > now and not force_extend:
-                    # Still valid - return existing record without creating new peer
-                    return current, False
+                if current_expires_at > now:
+                    if extend_from_current:
+                        updated_record: FreeAccessRecord = dict(current)
+                        updated_record["granted_at"] = now.isoformat()
+                        updated_record["expires_at"] = (current_expires_at + timedelta(hours=effective_hours)).isoformat()
+                        updated_record["claims_count"] = int(current.get("claims_count", 0)) + 1
+                        updated_record["source"] = source
+                        updated_record["reminder_thresholds_sent"] = []
+                        state[user_key] = updated_record
+                        _save_state(state)
+
+                        stats = _load_stats()
+                        stats["total_claims"] = int(stats.get("total_claims", 0)) + 1
+                        _save_stats(stats)
+                        return updated_record, False
+
+                    if not force_extend:
+                        # Still valid - return existing record without creating new peer.
+                        return current, False
             except Exception:
                 pass
     
@@ -473,11 +490,21 @@ def grant_free_access(
         now = _now_utc()
         current = state.get(user_key)
         claims_count = (current.get("claims_count", 0) if current else 0) + 1
+        if extend_from_current and current is not None:
+            try:
+                base_expires_at = _parse_dt(current["expires_at"])
+                if base_expires_at < now:
+                    base_expires_at = now
+            except Exception:
+                base_expires_at = now
+            expires_at = base_expires_at + timedelta(hours=effective_hours)
+        else:
+            expires_at = now + timedelta(hours=effective_hours)
         
         new_record: FreeAccessRecord = {
             "access_key": profile["profile_id"],
             "granted_at": now.isoformat(),
-            "expires_at": (now + timedelta(hours=effective_hours)).isoformat(),
+            "expires_at": expires_at.isoformat(),
             "claims_count": claims_count,
             "reminder_thresholds_sent": [],
             "source": source,

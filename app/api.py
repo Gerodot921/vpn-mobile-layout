@@ -621,11 +621,22 @@ async def claim_free_access(request: web.Request) -> web.Response:
         init_data = _init_data_from_payload(payload)
         user_data = _extract_user(init_data)
         user_id = int(user_data["id"])
+        extend_requested = bool(payload.get("extend", False))
 
         ensure_user(user_id, user_data.get("username"))
         ensure_wireguard_profile(user_id)
 
-        if is_free_access_active(user_id):
+        active_free_access = is_free_access_active(user_id)
+        if extend_requested and active_free_access:
+            record, created = grant_free_access(
+                user_id,
+                DEFAULT_FREE_ACCESS_HOURS,
+                source="mini_app_ad_extend",
+                force_extend=False,
+                extend_from_current=True,
+            )
+            action_label = "mini_app_ad_extend"
+        elif active_free_access:
             record = get_free_access_record(user_id)
             if record is None:
                 record, _ = grant_free_access(user_id, DEFAULT_FREE_ACCESS_HOURS, source="mini_app_ad", force_extend=False)
