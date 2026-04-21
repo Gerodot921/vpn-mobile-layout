@@ -217,7 +217,7 @@ def _build_admin_help_lines() -> list[str]:
         "/allstat — общая статистика по всем типам",
         "/create <n> <m> — создать n персональных конфигов на m дней",
         "/delete <config_id> — удалить персональный конфиг по ID",
-        "/addtarif <username> <tariff> — выдать тариф пользователю",
+        "/addtarif <username> <tariff> — выдать тариф и отправить конфиг пользователю",
         "/deletetarif <username> <free|blatnoy|paid> — удалить тариф и его конфиг",
         "/adset <asset_url> [seconds] [click_url] — установить рекламу",
         "/adon — включить рекламу",
@@ -601,6 +601,8 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         return
 
     lines: list[str] = [f"Пользователь: @{username_arg} | id={target_user_id}"]
+    config_text_to_send: str | None = None
+    config_filename_to_send: str | None = None
 
     if tariff_arg == "free":
         record, created = grant_free_access(
@@ -616,6 +618,8 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         lines.append(f"Выдан тариф: free ({'новый' if created else 'продлён'})")
         lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
         lines.append(f"Конфиг: {record.get('vpn_config_name', '-')}")
+        config_text_to_send = get_wireguard_config_text(target_user_id)
+        config_filename_to_send = get_wireguard_config_filename(target_user_id)
 
     elif tariff_arg == "blatnoy":
         active_configs = list_active_personal_configs()
@@ -644,6 +648,8 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         lines.append(f"Config ID: {target_config.get('config_id', '-')}")
         lines.append(f"Файл: {target_config.get('config_filename', '-')}")
         lines.append(f"До: {_fmt_dt(target_config.get('expires_at', '-'))}")
+        config_text_to_send = target_config.get("config_text") if isinstance(target_config.get("config_text"), str) else None
+        config_filename_to_send = target_config.get("config_filename") if isinstance(target_config.get("config_filename"), str) else None
 
     else:
         if tariff_arg == "paid":
@@ -664,20 +670,27 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         lines.append("Выдан тариф: paid")
         lines.append(f"План: {plan_name}")
         lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
+        config_text_to_send = get_wireguard_config_text(target_user_id)
+        config_filename_to_send = get_wireguard_config_filename(target_user_id)
 
-    config_text = get_wireguard_config_text(target_user_id)
-    config_filename = get_wireguard_config_filename(target_user_id)
-    if config_text:
+    if not config_text_to_send:
+        ensure_wireguard_profile(target_user_id)
+        config_text_to_send = get_wireguard_config_text(target_user_id)
+        config_filename_to_send = get_wireguard_config_filename(target_user_id)
+
+    if config_text_to_send and config_filename_to_send:
         try:
             await message.bot.send_document(
                 target_user_id,
-                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                BufferedInputFile(config_text_to_send.encode("utf-8"), filename=config_filename_to_send),
                 caption="Ваш тариф назначен администратором.",
             )
-            lines.append(f"Конфиг отправлен пользователю: {config_filename}")
+            lines.append(f"Конфиг отправлен пользователю: {config_filename_to_send}")
         except Exception:
             logging.exception("Failed to send config after /addtarif to user_id=%s", target_user_id)
             lines.append("Не удалось отправить конфиг пользователю")
+    else:
+        lines.append("Не удалось сформировать конфиг для отправки пользователю")
 
     await message.answer("\n".join(lines))
 
