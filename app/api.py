@@ -452,9 +452,6 @@ def _build_available_configs(
                 "configName": personal_record.get("config_filename"),
                 "expiresAt": personal_record.get("expires_at"),
                 "accessSource": "personal",
-                "capacityTotal": 1,
-                "capacityUsed": 1,
-                "capacityAvailable": 0,
             }
         )
 
@@ -469,18 +466,11 @@ def _build_available_configs(
                 "configName": free_record.get("vpn_config_name"),
                 "expiresAt": free_record.get("expires_at"),
                 "accessSource": "free",
-                "capacityTotal": 1,
-                "capacityUsed": 1,
-                "capacityAvailable": 0,
             }
         )
 
     if isinstance(paid_record, dict):
         paid_plan_code = _resolve_plan_code_from_name(str(paid_record.get("plan_name", paid_plan_name)))
-        paid_plan = PAYMENT_PLAN_CATALOG.get(paid_plan_code, {})
-        capacity_total = int(paid_plan.get("max_configs") or 1)
-        capacity_used = 1
-        capacity_available = max(capacity_total - capacity_used, 0)
         configs.append(
             {
                 "tier": "paid",
@@ -491,9 +481,6 @@ def _build_available_configs(
                 "configName": paid_record.get("plan_name", paid_plan_name),
                 "expiresAt": paid_record.get("expires_at"),
                 "accessSource": "subscription",
-                "capacityTotal": capacity_total,
-                "capacityUsed": capacity_used,
-                "capacityAvailable": capacity_available,
             }
         )
 
@@ -541,37 +528,30 @@ def _build_tariff_capacity_overview(
     paid_record: dict[str, Any] | None,
     paid_plan_name: str,
     available_configs: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    active_paid_code = ""
-    if isinstance(paid_record, dict):
-        active_paid_code = _resolve_plan_code_from_name(str(paid_record.get("plan_name") or paid_plan_name))
-
-    used_by_plan: dict[str, int] = {}
-    for item in available_configs:
-        if not isinstance(item, dict):
-            continue
-        plan_code = str(item.get("planCode") or "").strip().lower()
-        if not plan_code:
-            continue
-        used_by_plan[plan_code] = used_by_plan.get(plan_code, 0) + 1
-
-    overview: list[dict[str, Any]] = []
-    for code, plan in PAYMENT_PLAN_CATALOG.items():
-        total = int(plan.get("max_configs") or 1)
-        is_active = code == active_paid_code
-        used = used_by_plan.get(code, 0) if is_active else 0
-        available = max(total - used, 0) if is_active else 0
-        overview.append(
-            {
-                "planCode": code,
-                "planName": plan.get("name", code),
-                "maxConfigs": total,
-                "usedConfigs": used,
-                "availableConfigs": available,
-                "active": is_active,
-            }
-        )
-    return overview
+) -> dict[str, Any] | None:
+    """Build active tariff capacity info only (not all tariffs)"""
+    if paid_record is None:
+        return None
+    
+    active_paid_code = _resolve_plan_code_from_name(str(paid_record.get("plan_name") or paid_plan_name))
+    if not active_paid_code:
+        return None
+    
+    active_plan = PAYMENT_PLAN_CATALOG.get(active_paid_code)
+    if not active_plan:
+        return None
+    
+    total = int(active_plan.get("max_configs") or 1)
+    assigned = len([c for c in available_configs if str(c.get("accessSource") or "") == "personal"])
+    available = max(total - assigned, 0)
+    
+    return {
+        "planCode": active_paid_code,
+        "planName": active_plan.get("name", active_paid_code),
+        "maxConfigs": total,
+        "assignedConfigs": assigned,
+        "availableConfigs": available,
+    }
 
 
 def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
@@ -592,7 +572,7 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
         paid_plan_name,
     )
     access_info = _resolve_access_info(available_configs)
-    tariff_capacity_overview = _build_tariff_capacity_overview(
+    tariff_capacity_active = _build_tariff_capacity_overview(
         paid_record if paid_active else None,
         paid_plan_name,
         available_configs,
@@ -632,7 +612,7 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
         },
         "access_info": access_info,
         "available_configs": available_configs,
-        "tariff_capacity_overview": tariff_capacity_overview,
+        "tariff_capacity_active": tariff_capacity_active,
     }
 
 

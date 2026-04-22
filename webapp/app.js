@@ -15,7 +15,6 @@ const freeAccessValue = document.getElementById("freeAccessValue");
 const rewardStatus = document.getElementById("rewardStatus");
 const rewardTimer = document.getElementById("rewardTimer");
 const freeAccessExtendBtn = document.getElementById("freeAccessExtendBtn");
-const tariffCapacityList = document.getElementById("tariffCapacityList");
 const accessConfigsList = document.getElementById("accessConfigsList");
 const rewardPanel = document.querySelector(".reward-panel");
 const adOverlay = document.getElementById("adOverlay");
@@ -222,7 +221,7 @@ const state = {
     expiresAt: null,
   },
   availableConfigs: [],
-  tariffCapacityOverview: [],
+  tariffCapacityActive: null,
   rewardReadyAt: 0,
   referral: {
     referrerId: null,
@@ -744,11 +743,19 @@ function renderAccessConfigs(accessConfigs) {
           ? item.key_value
           : "";
     const expiresText = formatDateTime(item?.expiresAt || item?.expires_at);
-    const capacityAvailable = Number(item?.capacityAvailable ?? item?.capacity_available);
-    const capacityTotal = Number(item?.capacityTotal ?? item?.capacity_total);
-    const hasCapacity = Number.isFinite(capacityAvailable) && Number.isFinite(capacityTotal) && capacityTotal > 0;
     const row = document.createElement("div");
     row.className = `access-config-item tier-${tier}`;
+    
+    let capacityInfo = "";
+    if (tier === "paid") {
+      const capacity = state.tariffCapacityActive;
+      if (capacity && Number.isFinite(capacity.maxConfigs)) {
+        const assigned = Number(capacity.assignedConfigs ?? 0);
+        const max = capacity.maxConfigs;
+        capacityInfo = `<div><strong>Конфиги тарифа:</strong> активирован ${assigned} из ${max}</div>`;
+      }
+    }
+    
     row.innerHTML = `
       <div class="access-config-top">
         <span class="access-config-title">${title}</span>
@@ -757,51 +764,11 @@ function renderAccessConfigs(accessConfigs) {
       <div class="access-config-meta">
         ${configName ? `<div><strong>Конфиг:</strong> ${configName}</div>` : ""}
         ${keyValue ? `<div><strong>Ключ:</strong> ${keyValue}</div>` : ""}
-        ${hasCapacity ? `<div><strong>Конфиги тарифа:</strong> доступно ${capacityAvailable} из ${capacityTotal}</div>` : ""}
+        ${capacityInfo}
         ${expiresText && expiresText !== "-" ? `<div><strong>Действует до:</strong> ${expiresText}</div>` : ""}
       </div>
     `;
     accessConfigsList.appendChild(row);
-  });
-}
-
-
-function renderTariffCapacityOverview(overview) {
-  if (!tariffCapacityList) {
-    return;
-  }
-
-  tariffCapacityList.innerHTML = "";
-  const rows = Array.isArray(overview) ? overview : [];
-  if (!rows.length) {
-    return;
-  }
-
-  rows.forEach((item) => {
-    const planName = typeof item?.planName === "string" && item.planName ? item.planName : "Тариф";
-    const maxConfigs = Number(item?.maxConfigs ?? item?.max_configs);
-    const availableConfigs = Number(item?.availableConfigs ?? item?.available_configs);
-    const usedConfigs = Number(item?.usedConfigs ?? item?.used_configs);
-    const active = Boolean(item?.active);
-
-    if (!Number.isFinite(maxConfigs) || maxConfigs <= 0) {
-      return;
-    }
-
-    const row = document.createElement("div");
-    row.className = "tariff-capacity-row";
-    if (active) {
-      row.classList.add("active");
-    }
-
-    const availableText = Number.isFinite(availableConfigs) ? availableConfigs : 0;
-    const usedText = Number.isFinite(usedConfigs) ? usedConfigs : 0;
-    row.innerHTML = `
-      <span class="tariff-capacity-name">${planName}</span>
-      <span class="tariff-capacity-meta">доступно ${availableText} из ${maxConfigs} • занято ${usedText}</span>
-    `;
-
-    tariffCapacityList.appendChild(row);
   });
 }
 
@@ -1044,7 +1011,6 @@ function syncFreeAccessPanel() {
   const accessRemaining = state.freeAccessUntil - now;
   const info = state.accessInfo || {};
   const configs = Array.isArray(state.availableConfigs) ? state.availableConfigs : [];
-  const overview = Array.isArray(state.tariffCapacityOverview) ? state.tariffCapacityOverview : [];
   const hasAnyActiveAccess =
     (typeof info.tier === "string" && info.tier !== "none") || accessRemaining > 0 || hasPaidAccess();
 
@@ -1086,7 +1052,6 @@ function syncFreeAccessPanel() {
 
   rewardStatus.textContent = "";
   rewardTimer.textContent = "";
-  renderTariffCapacityOverview(overview);
   renderAccessConfigs(configs);
 }
 
@@ -1574,11 +1539,11 @@ function applyUserState(payload) {
     : Array.isArray(payload.available_configs)
       ? payload.available_configs
       : [];
-  state.tariffCapacityOverview = Array.isArray(payload.tariffCapacityOverview)
-    ? payload.tariffCapacityOverview
-    : Array.isArray(payload.tariff_capacity_overview)
-      ? payload.tariff_capacity_overview
-      : [];
+  state.tariffCapacityActive = typeof payload.tariffCapacityActive === "object" && payload.tariffCapacityActive
+    ? payload.tariffCapacityActive
+    : typeof payload.tariff_capacity_active === "object" && payload.tariff_capacity_active
+      ? payload.tariff_capacity_active
+      : null;
 
   updateReferralStats();
   syncSubscription();
