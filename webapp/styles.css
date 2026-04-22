@@ -133,6 +133,40 @@ body {
   display: block;
 }
 
+.tariff-capacity-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tariff-capacity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 7px 10px;
+  background: rgba(15, 28, 48, 0.72);
+}
+
+.tariff-capacity-row.active {
+  border-color: rgba(0, 211, 167, 0.55);
+  background: linear-gradient(90deg, rgba(0, 211, 167, 0.14), rgba(36, 165, 255, 0.08));
+}
+
+.tariff-capacity-name {
+  font-size: 12px;
+  font-weight: 800;
+  color: #d8ebff;
+}
+
+.tariff-capacity-meta {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ec2ea;
+}
+
 .access-configs {
   display: grid;
   gap: 10px;

@@ -655,14 +655,14 @@ async def send_free_access_reminders(bot) -> int:
 
         message = (
             f"⏰ Ваш бесплатный доступ к SkullVPN заканчивается через {_format_minutes_text(minutes_left)}!\n\n"
-            "Купите любой из доступных тарифов, чтобы продолжить пользоваться VPN без перерывов."
+            "Продлите доступ прямо сейчас: откройте Mini App и посмотрите рекламу, чтобы добавить +1 час."
         )
 
         try:
             await bot.send_message(
                 chat_id=user_id,
                 text=message,
-                reply_markup=subscription_inline_keyboard(),
+                reply_markup=subscription_inline_keyboard(include_ad_renewal=True),
             )
             logging.info("Sent expiry reminder to user_id=%s", user_id)
         except Exception:

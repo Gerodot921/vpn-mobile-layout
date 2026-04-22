@@ -145,10 +145,22 @@ def issue_fix_step_two_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def subscription_inline_keyboard() -> InlineKeyboardMarkup:
+def subscription_inline_keyboard(include_ad_renewal: bool = False) -> InlineKeyboardMarkup:
+    url = _mini_app_url()
+
+    if url:
+        primary_text = "🎬 Продлить за рекламу в Mini App" if include_ad_renewal else "💳 Купить или продлить в Mini App"
+        primary_button = InlineKeyboardButton(
+            text=primary_text,
+            web_app=WebAppInfo(url=url),
+        )
+    else:
+        fallback_text = "ℹ️ Mini App URL не настроен"
+        primary_button = InlineKeyboardButton(text=fallback_text, callback_data="mini_app_not_configured")
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оплатить (заглушка)", callback_data="pay_stub")],
+            [primary_button],
             [InlineKeyboardButton(text="⬅️ Вернуться назад", callback_data="back_to_connected")],
         ]
     )

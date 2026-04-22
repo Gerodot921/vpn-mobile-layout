@@ -50,6 +50,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "days": 30,
         "stars": 158,
         "crypto_ton": 0.1,
+        "max_configs": 1,
     },
     "double": {
         "code": "double",
@@ -60,6 +61,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "days": 30,
         "stars": 322,
         "crypto_ton": 0.26,
+        "max_configs": 2,
     },
     "trio": {
         "code": "trio",
@@ -70,6 +72,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "days": 30,
         "stars": 506,
         "crypto_ton": 0.4,
+        "max_configs": 3,
     },
     "together": {
         "code": "together",
@@ -80,6 +83,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "days": 30,
         "stars": 740,
         "crypto_ton": 0.58,
+        "max_configs": 4,
     },
     "family": {
         "code": "family",
@@ -90,6 +94,7 @@ PAYMENT_PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "days": 30,
         "stars": 929,
         "crypto_ton": 0.73,
+        "max_configs": 5,
     },
 }
 
@@ -144,6 +149,19 @@ def _normalize_plan_name(plan_name: str) -> str:
 
 def _resolve_payment_plan(plan_code: str) -> dict[str, Any] | None:
     return PAYMENT_PLAN_CATALOG.get(_normalize_plan_code(plan_code))
+
+
+def _resolve_plan_code_from_name(plan_name: str) -> str:
+    normalized_name = _normalize_plan_name(plan_name)
+    direct_code = _normalize_plan_code(normalized_name)
+    if direct_code in PAYMENT_PLAN_CATALOG:
+        return direct_code
+
+    for code, plan in PAYMENT_PLAN_CATALOG.items():
+        item_name = str(plan.get("name") or "")
+        if _normalize_plan_name(item_name) == normalized_name:
+            return code
+    return ""
 
 
 def _resolve_payment_plan_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
@@ -429,10 +447,14 @@ def _build_available_configs(
                 "tier": "blatnoy",
                 "title": "Блатной",
                 "tariffName": "Блатной",
+                "planCode": "blatnoy",
                 "keyValue": personal_record.get("config_id"),
                 "configName": personal_record.get("config_filename"),
                 "expiresAt": personal_record.get("expires_at"),
                 "accessSource": "personal",
+                "capacityTotal": 1,
+                "capacityUsed": 1,
+                "capacityAvailable": 0,
             }
         )
 
@@ -442,23 +464,36 @@ def _build_available_configs(
                 "tier": "free",
                 "title": "Бесплатный",
                 "tariffName": "Бесплатный доступ",
+                "planCode": "free",
                 "keyValue": free_record.get("access_key"),
                 "configName": free_record.get("vpn_config_name"),
                 "expiresAt": free_record.get("expires_at"),
                 "accessSource": "free",
+                "capacityTotal": 1,
+                "capacityUsed": 1,
+                "capacityAvailable": 0,
             }
         )
 
     if isinstance(paid_record, dict):
+        paid_plan_code = _resolve_plan_code_from_name(str(paid_record.get("plan_name", paid_plan_name)))
+        paid_plan = PAYMENT_PLAN_CATALOG.get(paid_plan_code, {})
+        capacity_total = int(paid_plan.get("max_configs") or 1)
+        capacity_used = 1
+        capacity_available = max(capacity_total - capacity_used, 0)
         configs.append(
             {
                 "tier": "paid",
                 "title": "Платный",
                 "tariffName": paid_record.get("plan_name", paid_plan_name),
+                "planCode": paid_plan_code,
                 "keyValue": paid_record.get("plan_name", paid_plan_name),
                 "configName": paid_record.get("plan_name", paid_plan_name),
                 "expiresAt": paid_record.get("expires_at"),
                 "accessSource": "subscription",
+                "capacityTotal": capacity_total,
+                "capacityUsed": capacity_used,
+                "capacityAvailable": capacity_available,
             }
         )
 
@@ -502,6 +537,43 @@ def _resolve_access_info(available_configs: list[dict[str, Any]]) -> dict[str, A
     }
 
 
+def _build_tariff_capacity_overview(
+    paid_record: dict[str, Any] | None,
+    paid_plan_name: str,
+    available_configs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    active_paid_code = ""
+    if isinstance(paid_record, dict):
+        active_paid_code = _resolve_plan_code_from_name(str(paid_record.get("plan_name") or paid_plan_name))
+
+    used_by_plan: dict[str, int] = {}
+    for item in available_configs:
+        if not isinstance(item, dict):
+            continue
+        plan_code = str(item.get("planCode") or "").strip().lower()
+        if not plan_code:
+            continue
+        used_by_plan[plan_code] = used_by_plan.get(plan_code, 0) + 1
+
+    overview: list[dict[str, Any]] = []
+    for code, plan in PAYMENT_PLAN_CATALOG.items():
+        total = int(plan.get("max_configs") or 1)
+        is_active = code == active_paid_code
+        used = used_by_plan.get(code, 0) if is_active else 0
+        available = max(total - used, 0) if is_active else 0
+        overview.append(
+            {
+                "planCode": code,
+                "planName": plan.get("name", code),
+                "maxConfigs": total,
+                "usedConfigs": used,
+                "availableConfigs": available,
+                "active": is_active,
+            }
+        )
+    return overview
+
+
 def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
     user_id = int(user_data["id"])
     referral = ensure_user(user_id, user_data.get("username"))
@@ -520,6 +592,11 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
         paid_plan_name,
     )
     access_info = _resolve_access_info(available_configs)
+    tariff_capacity_overview = _build_tariff_capacity_overview(
+        paid_record if paid_active else None,
+        paid_plan_name,
+        available_configs,
+    )
 
     return {
         "ok": True,
@@ -555,6 +632,7 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
         },
         "access_info": access_info,
         "available_configs": available_configs,
+        "tariff_capacity_overview": tariff_capacity_overview,
     }
 
 
