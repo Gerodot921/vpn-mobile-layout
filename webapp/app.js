@@ -1344,7 +1344,6 @@ async function startFreeAccessRenewalFlow() {
         saveRewardTimerState();
 
         const accessData = await requestFreeAccessWithRetry(3, true);
-        const submittedViaChat = submitFreeAccessRequest(1, true);
 
         state.adSessionToken = null;
         state.adSessionStartedAtMs = 0;
@@ -1354,11 +1353,7 @@ async function startFreeAccessRenewalFlow() {
         applyUserState(accessData);
 
         hideAdOverlay();
-        showToast(
-          submittedViaChat
-            ? "Реклама просмотрена. Доступ продлён на 1 час, конфиг отправлен в чат."
-            : "Реклама просмотрена. Доступ продлён на 1 час, конфиг отправлен в личные сообщения."
-        );
+        showToast("Реклама просмотрена. Срок действия конфигуратора успешно продлён на 1 час.");
       } catch (error) {
         const message = error?.message || "Не удалось продлить доступ после рекламы";
         showToast(message);

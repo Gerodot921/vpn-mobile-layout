@@ -68,8 +68,8 @@ async def webapp_data(message: Message) -> None:
     ensure_wireguard_profile(user_id)
 
     intro_text = (
-        "✅ Реклама просмотрена, доступ продлён на 1 час.\n"
-        "Конфиг и сообщение с данными отправляю ниже в этот чат."
+        "✅ Реклама просмотрена, срок действия конфигуратора продлён на 1 час.\n"
+        "Повторно конфиг не отправляю, он уже активен."
         if extend_requested
         else "✅ Реклама просмотрена, доступ выдан на 1 час.\n"
         "Конфиг и сообщение с данными отправляю ниже в этот чат."
@@ -98,6 +98,9 @@ async def webapp_data(message: Message) -> None:
             ),
             disable_web_page_preview=True,
         )
+
+    if extend_requested:
+        return
 
     config_text = get_wireguard_config_text(user_id)
     if not config_text:

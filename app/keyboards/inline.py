@@ -149,7 +149,7 @@ def subscription_inline_keyboard(include_ad_renewal: bool = False) -> InlineKeyb
     url = _mini_app_url()
 
     if url:
-        primary_text = "🎬 Продлить за рекламу в Mini App" if include_ad_renewal else "💳 Купить или продлить в Mini App"
+        primary_text = "🎬 Продлить доступ за просмотр рекламы" if include_ad_renewal else "💳 Купить или продлить в Mini App"
         primary_button = InlineKeyboardButton(
             text=primary_text,
             web_app=WebAppInfo(url=url),
