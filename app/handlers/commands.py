@@ -475,7 +475,7 @@ async def create_personal_configs_command(message: Message, command: CommandObje
         await message.answer("n и m должны быть больше 0")
         return
 
-    records = create_personal_configs(count=count, days=days)
+    records = create_personal_configs(count=count, days=days, owner_user_id=message.from_user.id if message.from_user else None)
     await message.answer(f"Создано персональных конфигов: {len(records)} (срок: {days} дн.)")
 
     for record in records:
@@ -633,7 +633,7 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         )
 
         if target_config is None:
-            created_configs = create_personal_configs(count=1, days=30)
+            created_configs = create_personal_configs(count=1, days=30, owner_user_id=target_user_id)
             if not created_configs:
                 await message.answer("Не удалось создать персональный конфиг")
                 return

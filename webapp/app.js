@@ -15,6 +15,7 @@ const freeAccessValue = document.getElementById("freeAccessValue");
 const rewardStatus = document.getElementById("rewardStatus");
 const rewardTimer = document.getElementById("rewardTimer");
 const freeAccessExtendBtn = document.getElementById("freeAccessExtendBtn");
+const activateConfigsBtn = document.getElementById("activateConfigsBtn");
 const accessConfigsList = document.getElementById("accessConfigsList");
 const rewardPanel = document.querySelector(".reward-panel");
 const adOverlay = document.getElementById("adOverlay");
@@ -222,6 +223,7 @@ const state = {
   },
   availableConfigs: [],
   tariffCapacityActive: null,
+  pendingPersonalConfigsCount: 0,
   rewardReadyAt: 0,
   referral: {
     referrerId: null,
@@ -1011,6 +1013,7 @@ function syncFreeAccessPanel() {
   const accessRemaining = state.freeAccessUntil - now;
   const info = state.accessInfo || {};
   const configs = Array.isArray(state.availableConfigs) ? state.availableConfigs : [];
+  const pendingCount = Number(state.pendingPersonalConfigsCount || 0);
   const hasAnyActiveAccess =
     (typeof info.tier === "string" && info.tier !== "none") || accessRemaining > 0 || hasPaidAccess();
 
@@ -1039,6 +1042,20 @@ function syncFreeAccessPanel() {
   freeAccessValue.disabled = true;
   freeAccessValue.title = "";
 
+  if (rewardStatus) {
+    if (keyValue) {
+      rewardStatus.textContent = info.tier === "blatnoy"
+        ? `Активированный ключ: ${keyValue}`
+        : `Ключ: ${keyValue}`;
+    } else {
+      rewardStatus.textContent = "Ключ: -";
+    }
+  }
+
+  if (rewardTimer) {
+    rewardTimer.textContent = info.configName ? `Конфиг: ${info.configName}` : "Конфиг: -";
+  }
+
   if (freeAccessExtendBtn) {
     const renewalAvailable = isFreeAccessRenewalAvailable();
     freeAccessExtendBtn.classList.toggle("hidden", !renewalAvailable);
@@ -1050,8 +1067,15 @@ function syncFreeAccessPanel() {
     }
   }
 
-  rewardStatus.textContent = "";
-  rewardTimer.textContent = "";
+  if (activateConfigsBtn) {
+    const showActivateButton = pendingCount > 0 && (info.tier === "paid" || info.tier === "blatnoy" || info.tier === "universal");
+    activateConfigsBtn.classList.toggle("hidden", !showActivateButton);
+    activateConfigsBtn.disabled = pendingCount <= 0;
+    if (showActivateButton) {
+      activateConfigsBtn.textContent = `🔓 Активировать конфигураторы (${pendingCount})`;
+    }
+  }
+
   renderAccessConfigs(configs);
 }
 
@@ -1539,6 +1563,7 @@ function applyUserState(payload) {
     : typeof payload.tariff_capacity_active === "object" && payload.tariff_capacity_active
       ? payload.tariff_capacity_active
       : null;
+  state.pendingPersonalConfigsCount = Number(payload.pending_personal_configs_count || payload.pendingPersonalConfigsCount || 0);
 
   updateReferralStats();
   syncSubscription();
@@ -1590,6 +1615,28 @@ function formatRub(value) {
     return "0";
   }
   return new Intl.NumberFormat("ru-RU").format(Math.round(numeric));
+}
+
+
+async function requestActivatePersonalConfigs() {
+  if (!tg?.initData) {
+    throw new Error("Откройте Mini App внутри Telegram");
+  }
+
+  const response = await fetch("/api/personal-configs/activate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ initData: tg.initData }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || "Не удалось активировать конфигураторы");
+  }
+
+  return data;
 }
 
 function renderTariffList() {
@@ -1761,6 +1808,27 @@ openAgainBtn.addEventListener("click", tryOpenAmnezia);
 checkBtn.addEventListener("click", verifyConnection);
 freeAccessExtendBtn?.addEventListener("click", () => {
   void startFreeAccessRenewalFlow();
+});
+
+activateConfigsBtn?.addEventListener("click", async () => {
+  try {
+    if (activateConfigsBtn) {
+      activateConfigsBtn.disabled = true;
+    }
+    const data = await requestActivatePersonalConfigs();
+    applyUserState(data);
+    showToast(
+      Number(data?.activated_configs_count || 0) > 0
+        ? "Конфигураторы активированы. Активированный ключ показан в панели доступа."
+        : "Нет оставшихся конфигураторов для активации"
+    );
+  } catch (error) {
+    showToast(error?.message || "Не удалось активировать конфигураторы");
+  } finally {
+    if (activateConfigsBtn) {
+      activateConfigsBtn.disabled = false;
+    }
+  }
 });
 
 disconnectBtn.addEventListener("click", () => {

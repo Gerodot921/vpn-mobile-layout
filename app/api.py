@@ -30,7 +30,7 @@ from app.free_access import (
     mark_free_access_peer_added,
 )
 from app.referrals import ensure_user, get_referral_invites, upsert_username
-from app.personal_configs import list_active_personal_configs_for_user
+from app.personal_configs import activate_pending_personal_configs_for_user, list_active_personal_configs_for_user, list_pending_personal_configs_for_user
 from app.payment_webhooks import log_payment_webhook_event
 from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
 from app.wireguard import ensure_wireguard_profile
@@ -497,24 +497,16 @@ def _resolve_access_info(available_configs: list[dict[str, Any]]) -> dict[str, A
             "expires_at": None,
         }
 
-    active_tiers = {str(item.get("tier") or "") for item in available_configs if isinstance(item, dict)}
-    active_tiers.discard("")
+    def _pick_primary() -> dict[str, Any]:
+        for desired_tier in ("blatnoy", "paid", "free"):
+            for item in available_configs:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("tier") or "") == desired_tier:
+                    return item
+        return available_configs[0]
 
-    if len(active_tiers) >= 2:
-        primary = available_configs[0]
-        latest_expires_at = max(
-            (str(item.get("expiresAt")) for item in available_configs if isinstance(item.get("expiresAt"), str) and item.get("expiresAt")),
-            default=None,
-        )
-        return {
-            "tier": "universal",
-            "key_title": "Универсальный",
-            "key_value": None,
-            "config_name": f"{len(available_configs)} конфигов",
-            "expires_at": latest_expires_at or primary.get("expiresAt"),
-        }
-
-    primary = available_configs[0]
+    primary = _pick_primary()
     return {
         "tier": primary.get("tier") or "none",
         "key_title": primary.get("title") or "Нет доступа",
@@ -577,6 +569,7 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
         paid_plan_name,
         available_configs,
     )
+    pending_personal_configs_count = len(list_pending_personal_configs_for_user(user_id))
 
     return {
         "ok": True,
@@ -613,6 +606,7 @@ def _build_state_payload(user_data: dict[str, Any]) -> dict[str, Any]:
         "access_info": access_info,
         "available_configs": available_configs,
         "tariff_capacity_active": tariff_capacity_active,
+        "pending_personal_configs_count": pending_personal_configs_count,
     }
 
 
@@ -831,6 +825,33 @@ async def claim_free_access(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
     except Exception:
         logging.exception("/api/claim-free-access unexpected error")
+        return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
+
+
+async def activate_personal_configs(request: web.Request) -> web.Response:
+    try:
+        payload = await _read_request_json(request)
+        init_data = _init_data_from_payload(payload)
+        user_data = _extract_user(init_data)
+        user_id = int(user_data["id"])
+
+        activated = activate_pending_personal_configs_for_user(user_id, user_data.get("username"))
+        response_payload = _build_state_payload(user_data)
+        response_payload["activated_configs_count"] = len(activated)
+        response_payload["activated_configs"] = [
+            {
+                "config_id": record.get("config_id"),
+                "config_name": record.get("config_filename"),
+                "key_value": record.get("config_id"),
+            }
+            for record in activated
+        ]
+        return web.json_response(response_payload)
+    except web.HTTPException as exc:
+        logging.warning("/api/personal-configs/activate failed: %s", exc.text)
+        return web.json_response({"ok": False, "error": exc.text}, status=exc.status)
+    except Exception:
+        logging.exception("/api/personal-configs/activate unexpected error")
         return web.json_response({"ok": False, "error": "Internal server error"}, status=500)
 
 
@@ -1173,6 +1194,7 @@ def create_api_app(bot: Bot) -> web.Application:
     app["bot"] = bot
     app.router.add_post("/api/user-state", user_state)
     app.router.add_post("/api/claim-free-access", claim_free_access)
+    app.router.add_post("/api/personal-configs/activate", activate_personal_configs)
     app.router.add_post("/api/ad/start", ad_start)
     app.router.add_post("/api/ad/complete", ad_complete)
     app.router.add_post("/api/ad/click", ad_click)

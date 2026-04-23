@@ -46,6 +46,7 @@ class PersonalConfigRecord(TypedDict):
     assigned_user_id: int | None
     assigned_username: str | None
     assigned_at: str | None
+    owner_user_id: int | None
 
 
 PersonalConfigsState = dict[str, PersonalConfigRecord]
@@ -80,10 +81,17 @@ def _connect() -> sqlite3.Connection:
             revoked_at TEXT,
             assigned_user_id INTEGER,
             assigned_username TEXT,
-            assigned_at TEXT
+            assigned_at TEXT,
+            owner_user_id INTEGER
         )
         """
     )
+    existing_columns = {
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info({PERSONAL_CONFIGS_TABLE})").fetchall()
+    }
+    if "owner_user_id" not in existing_columns:
+        connection.execute(f"ALTER TABLE {PERSONAL_CONFIGS_TABLE} ADD COLUMN owner_user_id INTEGER")
     connection.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{PERSONAL_CONFIGS_TABLE}_assigned_user_id ON {PERSONAL_CONFIGS_TABLE}(assigned_user_id)"
     )
@@ -110,6 +118,7 @@ def _row_to_record(row: tuple[Any, ...]) -> tuple[str, PersonalConfigRecord]:
         "assigned_user_id": int(row[11]) if row[11] is not None else None,
         "assigned_username": str(row[12]) if isinstance(row[12], str) and row[12] else None,
         "assigned_at": str(row[13]) if row[13] is not None else None,
+        "owner_user_id": int(row[14]) if len(row) > 14 and row[14] is not None else None,
     }
 
 
@@ -128,6 +137,7 @@ def _encode_state_value(record: PersonalConfigRecord) -> tuple[Any, ...]:
         record.get("assigned_user_id"),
         record.get("assigned_username"),
         record.get("assigned_at"),
+        record.get("owner_user_id"),
     )
 
 
@@ -166,8 +176,8 @@ def _ensure_seeded() -> None:
             connection.execute(
                 f"""
                 INSERT OR REPLACE INTO {PERSONAL_CONFIGS_TABLE}
-                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     config_id,
@@ -184,6 +194,7 @@ def _ensure_seeded() -> None:
                     value.get("assigned_user_id") if isinstance(value.get("assigned_user_id"), int) else None,
                     value.get("assigned_username") if isinstance(value.get("assigned_username"), str) and value.get("assigned_username") else None,
                     value.get("assigned_at") if isinstance(value.get("assigned_at"), str) and value.get("assigned_at") else None,
+                    value.get("owner_user_id") if isinstance(value.get("owner_user_id"), int) else None,
                 ),
             )
 
@@ -196,7 +207,7 @@ def _load_state() -> PersonalConfigsState:
     state: PersonalConfigsState = {}
     with _connect() as connection:
         rows = connection.execute(
-            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at FROM {PERSONAL_CONFIGS_TABLE}"
+            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id FROM {PERSONAL_CONFIGS_TABLE}"
         ).fetchall()
 
     for row in rows:
@@ -213,8 +224,8 @@ def _save_state(state: PersonalConfigsState) -> None:
             connection.execute(
                 f"""
                 INSERT OR REPLACE INTO {PERSONAL_CONFIGS_TABLE}
-                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (config_id, *_encode_state_value(record)),
             )
@@ -483,6 +494,35 @@ def assign_personal_config_to_user(config_id: str, user_id: int, username: str |
     return True
 
 
+def list_pending_personal_configs_for_user(user_id: int) -> list[PersonalConfigRecord]:
+    now = _now_utc()
+    pending: list[PersonalConfigRecord] = []
+    for record in list_personal_configs():
+        if record.get("owner_user_id") != user_id:
+            continue
+        if record.get("assigned_user_id") is not None:
+            continue
+        if record.get("revoked_at"):
+            continue
+        try:
+            if _parse_dt(record["expires_at"]) <= now:
+                continue
+        except Exception:
+            continue
+        pending.append(record)
+
+    pending.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    return pending
+
+
+def activate_pending_personal_configs_for_user(user_id: int, username: str | None = None) -> list[PersonalConfigRecord]:
+    activated: list[PersonalConfigRecord] = []
+    for record in list_pending_personal_configs_for_user(user_id):
+        if assign_personal_config_to_user(record["config_id"], user_id, username):
+            activated.append(record)
+    return activated
+
+
 def get_active_personal_config_for_user(user_id: int) -> PersonalConfigRecord | None:
     now = _now_utc()
     with _state_lock:
@@ -508,7 +548,7 @@ def get_active_personal_config_for_user(user_id: int) -> PersonalConfigRecord | 
     return candidates[0]
 
 
-def create_personal_configs(count: int, days: int) -> list[PersonalConfigRecord]:
+def create_personal_configs(count: int, days: int, owner_user_id: int | None = None) -> list[PersonalConfigRecord]:
     count = max(1, min(count, 100))
     days = max(1, min(days, 3650))
     revoke_expired_personal_configs()
@@ -552,6 +592,7 @@ def create_personal_configs(count: int, days: int) -> list[PersonalConfigRecord]
                 "assigned_user_id": None,
                 "assigned_username": None,
                 "assigned_at": None,
+                "owner_user_id": owner_user_id,
             }
             state[config_id] = record
             created.append(record)

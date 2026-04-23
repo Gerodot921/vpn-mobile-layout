@@ -90,7 +90,7 @@ async def on_successful_payment(message: Message) -> None:
     
     if max_configs > 1:
         # Create multiple configs
-        configs = create_personal_configs(count=max_configs, days=days)
+        configs = create_personal_configs(count=max_configs, days=days, owner_user_id=user.id)
         
         # Assign first config to user
         if configs:

@@ -4,6 +4,7 @@ from aiogram import F, Router
 from aiogram.types import BufferedInputFile, CallbackQuery
 
 from app.free_access import format_free_access_remaining_text, get_free_access_record
+from app.personal_configs import activate_pending_personal_configs_for_user, list_pending_personal_configs_for_user
 from app.keyboards.inline import (
     connect_inline_keyboard,
     get_vpn_inline_keyboard,
@@ -261,6 +262,40 @@ async def open_referral_program(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "pay_stub")
 async def pay_stub(callback: CallbackQuery) -> None:
     await callback.answer(PAYMENT_STUB_TEXT, show_alert=True)
+
+
+@router.callback_query(F.data.startswith("activate_configs_"))
+async def activate_configs(callback: CallbackQuery) -> None:
+    if not callback.from_user:
+        await callback.answer()
+        return
+
+    raw_target = callback.data.rsplit("_", 1)[-1] if callback.data else ""
+    try:
+        target_user_id = int(raw_target)
+    except Exception:
+        target_user_id = 0
+
+    if target_user_id != callback.from_user.id:
+        await callback.answer("Эта кнопка не для вас", show_alert=True)
+        return
+
+    pending_before = list_pending_personal_configs_for_user(target_user_id)
+    if not pending_before:
+        await callback.answer("Нет оставшихся конфигов для активации", show_alert=True)
+        return
+
+    activated = activate_pending_personal_configs_for_user(target_user_id, callback.from_user.username)
+    if callback.message:
+        config_lines = [f"• {record.get('config_filename', '-') }" for record in activated]
+        summary = (
+            f"✅ Активировано конфигов: {len(activated)}\n\n"
+            + "\n".join(config_lines)
+            + "\n\nОткрой Mini App заново, чтобы увидеть активированный ключ."
+        )
+        await callback.message.answer(summary, disable_web_page_preview=True)
+
+    await callback.answer("Конфигураторы активированы")
 
 
 @router.callback_query(F.data == "support_stub")
