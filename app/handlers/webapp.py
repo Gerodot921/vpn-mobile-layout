@@ -4,7 +4,7 @@ import json
 import logging
 
 from aiogram import F, Router
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import Message
 
 from app.free_access import (
     DEFAULT_FREE_ACCESS_HOURS,
@@ -13,17 +13,12 @@ from app.free_access import (
 )
 from app.referrals import ensure_user
 from app.subscriptions import ensure_subscription
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile
+from app.native_access import build_native_access_text_for_user
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
 from app.date_format import format_human_datetime
 
 router = Router()
-
-
-def _chunk_text(value: str, chunk_size: int = 3500) -> list[str]:
-    if not value:
-        return []
-    return [value[i : i + chunk_size] for i in range(0, len(value), chunk_size)]
 
 
 def _format_payload(data: str | None) -> dict[str, object]:
@@ -69,10 +64,10 @@ async def webapp_data(message: Message) -> None:
 
     intro_text = (
         "✅ Реклама просмотрена, срок действия конфигуратора продлён на 1 час.\n"
-        "Повторно конфиг не отправляю, он уже активен."
+        "Повторно данные подключения не отправляю, доступ уже активен."
         if extend_requested
         else "✅ Реклама просмотрена, доступ выдан на 1 час.\n"
-        "Конфиг и сообщение с данными отправляю ниже в этот чат."
+        "Данные подключения отправляю ниже в этот чат."
     )
 
     await message.answer(
@@ -102,53 +97,18 @@ async def webapp_data(message: Message) -> None:
     if extend_requested:
         return
 
-    config_text = get_wireguard_config_text(user_id)
-    if not config_text:
-        # Force regenerate once if profile exists but config text is missing.
-        ensure_wireguard_profile(user_id)
-        config_text = get_wireguard_config_text(user_id)
-
-    if not config_text:
-        logging.warning("WireGuard config text is empty in webapp flow for user_id=%s", user_id)
-        await message.answer(
-            "Не удалось сформировать .conf профиль автоматически. Напишите /getconf и мы отправим его вручную.",
-            disable_web_page_preview=True,
-        )
-        return
-
-    filename = get_wireguard_config_filename(user_id)
     add_peer_to_server(user_id)
+    native_access = build_native_access_text_for_user(
+        user_id,
+        title="Данные подключения AmneziaWG",
+    )
 
-    try:
-        await message.answer_document(
-            BufferedInputFile(config_text.encode("utf-8"), filename=filename),
-            caption="Профиль WireGuard / AmneziaWG",
-        )
+    if native_access:
+        await message.answer(native_access, disable_web_page_preview=True)
         return
-    except Exception:
-        logging.exception("Failed to send WebApp .conf document in chat for user_id=%s", user_id)
 
-    # Fallback 1: send file directly to user dialog.
-    try:
-        await message.bot.send_document(
-            user_id,
-            BufferedInputFile(config_text.encode("utf-8"), filename=filename),
-            caption="Профиль WireGuard / AmneziaWG",
-        )
-        await message.answer(
-            "Файл не отправился в этот чат, но мы отправили .conf в личные сообщения бота.",
-            disable_web_page_preview=True,
-        )
-        return
-    except Exception:
-        logging.exception("Failed to send WebApp .conf document in DM for user_id=%s", user_id)
-
-    # Fallback 2: send config as plain text chunks.
+    logging.warning("Native access text is empty in webapp flow for user_id=%s", user_id)
     await message.answer(
-        "Не удалось отправить файл документом. Отправляю конфиг текстом ниже:",
+        "Не удалось подготовить данные подключения автоматически. Напишите /getconf, отправим резервный вариант.",
         disable_web_page_preview=True,
     )
-    header = f"Имя файла: {filename}\n"
-    for idx, part in enumerate(_chunk_text(config_text), start=1):
-        prefix = header if idx == 1 else ""
-        await message.answer(prefix + part, disable_web_page_preview=True)

@@ -26,7 +26,8 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, add_peer_to_server_by_values, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.wireguard import add_peer_to_server, add_peer_to_server_by_values, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.native_access import build_native_access_text, build_native_access_text_for_user
 from app.date_format import format_human_datetime
 
 # Owner ID for admin commands
@@ -348,29 +349,20 @@ async def send_wireguard_profile(message: Message) -> None:
 
     user_id = message.from_user.id
     ensure_wireguard_profile(user_id)
-    config_text = get_wireguard_config_text(user_id)
-
-    if not config_text:
-        await message.answer("Не удалось собрать профиль. Попробуйте еще раз через 10 секунд.")
-        return
 
     peer_added = add_peer_to_server(user_id)
     if not peer_added:
         logging.warning("Peer was not added before sending profile for user_id=%s", user_id)
 
-    filename = get_wireguard_config_filename(user_id)
+    native_access = build_native_access_text_for_user(
+        user_id,
+        title="Данные подключения AmneziaWG",
+    )
+    if not native_access:
+        await message.answer("Не удалось собрать данные подключения. Попробуйте ещё раз через 10 секунд.")
+        return
 
-    try:
-        await message.answer_document(
-            BufferedInputFile(config_text.encode("utf-8"), filename=filename),
-            caption="Ваш профиль WireGuard / AmneziaWG (.conf)",
-        )
-    except Exception:
-        logging.exception("Failed to send .conf document for user_id=%s", user_id)
-        await message.answer(
-            "Не удалось отправить файл как документ. Ниже отправляю конфиг текстом:"
-        )
-        await message.answer(f"{filename}\n\n{config_text}")
+    await message.answer(native_access, disable_web_page_preview=True)
 
 
 @router.message(F.text.in_({"profile", "Profile", "профиль", "конфиг", "config"}), F.func(_is_owner))
@@ -385,7 +377,7 @@ async def reset_and_send_wireguard_profile(message: Message) -> None:
 
     user_id = message.from_user.id
     reset_wireguard_profile(user_id)
-    await message.answer("Профиль сброшен. Отправляю новый .conf")
+    await message.answer("Профиль сброшен. Отправляю новые данные подключения")
     await send_wireguard_profile(message)
 
 
@@ -602,8 +594,7 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         return
 
     lines: list[str] = [f"Пользователь: @{username_arg} | id={target_user_id}"]
-    config_text_to_send: str | None = None
-    config_filename_to_send: str | None = None
+    native_access_to_send: str | None = None
 
     if tariff_arg == "free":
         record, created = grant_free_access(
@@ -618,9 +609,10 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
 
         lines.append(f"Выдан тариф: free ({'новый' if created else 'продлён'})")
         lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
-        lines.append(f"Конфиг: {record.get('vpn_config_name', '-')}")
-        config_text_to_send = get_wireguard_config_text(target_user_id)
-        config_filename_to_send = get_wireguard_config_filename(target_user_id)
+        native_access_to_send = build_native_access_text_for_user(
+            target_user_id,
+            title="Данные подключения AmneziaWG",
+        )
 
     elif tariff_arg == "blatnoy":
         active_configs = list_active_personal_configs()
@@ -647,10 +639,11 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
 
         lines.append("Выдан тариф: blatnoy")
         lines.append(f"Config ID: {target_config.get('config_id', '-')}")
-        lines.append(f"Файл: {target_config.get('config_filename', '-')}")
         lines.append(f"До: {_fmt_dt(target_config.get('expires_at', '-'))}")
-        config_text_to_send = target_config.get("config_text") if isinstance(target_config.get("config_text"), str) else None
-        config_filename_to_send = target_config.get("config_filename") if isinstance(target_config.get("config_filename"), str) else None
+        native_access_to_send = build_native_access_text(
+            target_config,
+            title="Данные подключения AmneziaWG",
+        )
 
     else:
         if tariff_arg == "paid":
@@ -671,27 +664,31 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         lines.append("Выдан тариф: paid")
         lines.append(f"План: {plan_name}")
         lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
-        config_text_to_send = get_wireguard_config_text(target_user_id)
-        config_filename_to_send = get_wireguard_config_filename(target_user_id)
+        native_access_to_send = build_native_access_text_for_user(
+            target_user_id,
+            title="Данные подключения AmneziaWG",
+        )
 
-    if not config_text_to_send:
+    if not native_access_to_send:
         ensure_wireguard_profile(target_user_id)
-        config_text_to_send = get_wireguard_config_text(target_user_id)
-        config_filename_to_send = get_wireguard_config_filename(target_user_id)
+        native_access_to_send = build_native_access_text_for_user(
+            target_user_id,
+            title="Данные подключения AmneziaWG",
+        )
 
-    if config_text_to_send and config_filename_to_send:
+    if native_access_to_send:
         try:
-            await message.bot.send_document(
+            await message.bot.send_message(
                 target_user_id,
-                BufferedInputFile(config_text_to_send.encode("utf-8"), filename=config_filename_to_send),
-                caption="Ваш тариф назначен администратором.",
+                "Ваш тариф назначен администратором. Ниже данные подключения.\n\n" + native_access_to_send,
+                disable_web_page_preview=True,
             )
-            lines.append(f"Конфиг отправлен пользователю: {config_filename_to_send}")
+            lines.append("Данные подключения отправлены пользователю")
         except Exception:
             logging.exception("Failed to send config after /addtarif to user_id=%s", target_user_id)
-            lines.append("Не удалось отправить конфиг пользователю")
+            lines.append("Не удалось отправить данные подключения пользователю")
     else:
-        lines.append("Не удалось сформировать конфиг для отправки пользователю")
+        lines.append("Не удалось сформировать данные подключения для отправки пользователю")
 
     await message.answer("\n".join(lines))
 
@@ -730,26 +727,28 @@ async def repair_vpn_access_command(message: Message, command: CommandObject | N
         if not resend_configs:
             continue
 
-        config_text = get_wireguard_config_text(user_id)
-        config_filename = get_wireguard_config_filename(user_id)
-        if not config_text:
+        native_access = build_native_access_text_for_user(
+            user_id,
+            title="Данные подключения AmneziaWG",
+        )
+        if not native_access:
             standard_send_fail += 1
             continue
 
         try:
-            await message.bot.send_document(
+            await message.bot.send_message(
                 user_id,
-                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                caption="Сервер обновлён. Отправляем актуальный профиль WireGuard / AmneziaWG.",
+                "Сервер обновлён. Отправляем актуальные данные подключения.\n\n" + native_access,
+                disable_web_page_preview=True,
             )
             standard_send_ok += 1
         except TelegramRetryAfter as exc:
             await asyncio.sleep(float(exc.retry_after) + 0.1)
             try:
-                await message.bot.send_document(
+                await message.bot.send_message(
                     user_id,
-                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                    caption="Сервер обновлён. Отправляем актуальный профиль WireGuard / AmneziaWG.",
+                    "Сервер обновлён. Отправляем актуальные данные подключения.\n\n" + native_access,
+                    disable_web_page_preview=True,
                 )
                 standard_send_ok += 1
             except Exception:
@@ -778,26 +777,28 @@ async def repair_vpn_access_command(message: Message, command: CommandObject | N
         if not resend_configs:
             continue
 
-        config_text = str(record.get("config_text") or "")
-        config_filename = str(record.get("config_filename") or "skull-vpn-config.conf")
-        if not config_text:
+        native_access = build_native_access_text(
+            record,
+            title="Данные подключения AmneziaWG",
+        )
+        if not native_access:
             personal_send_fail += 1
             continue
 
         try:
-            await message.bot.send_document(
+            await message.bot.send_message(
                 assigned_user_id,
-                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                caption="Сервер обновлён. Отправляем актуальный персональный профиль WireGuard / AmneziaWG.",
+                "Сервер обновлён. Отправляем актуальные персональные данные подключения.\n\n" + native_access,
+                disable_web_page_preview=True,
             )
             personal_send_ok += 1
         except TelegramRetryAfter as exc:
             await asyncio.sleep(float(exc.retry_after) + 0.1)
             try:
-                await message.bot.send_document(
+                await message.bot.send_message(
                     assigned_user_id,
-                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                    caption="Сервер обновлён. Отправляем актуальный персональный профиль WireGuard / AmneziaWG.",
+                    "Сервер обновлён. Отправляем актуальные персональные данные подключения.\n\n" + native_access,
+                    disable_web_page_preview=True,
                 )
                 personal_send_ok += 1
             except Exception:

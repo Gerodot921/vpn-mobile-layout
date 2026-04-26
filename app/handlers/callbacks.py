@@ -1,7 +1,7 @@
 ﻿import logging
 
 from aiogram import F, Router
-from aiogram.types import BufferedInputFile, CallbackQuery
+from aiogram.types import CallbackQuery
 
 from app.free_access import format_free_access_remaining_text, get_free_access_record
 from app.personal_configs import activate_pending_personal_configs_for_user, list_pending_personal_configs_for_user
@@ -16,7 +16,8 @@ from app.keyboards.inline import (
     support_inline_keyboard,
 )
 from app.referrals import activate_user_and_apply_bonus, ensure_user
-from app.wireguard import add_peer_to_server, get_wireguard_config_filename, get_wireguard_config_text
+from app.wireguard import add_peer_to_server
+from app.native_access import build_native_access_text_for_user
 from app.texts import (
     CONNECTED_TEXT,
     DEMO_LINK_TEXT,
@@ -98,32 +99,24 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
                 ),
                 disable_web_page_preview=True,
             )
-            referrer_config_text = get_wireguard_config_text(referrer_id)
-            if referrer_config_text:
-                await callback.bot.send_document(
-                    referrer_id,
-                    BufferedInputFile(
-                        referrer_config_text.encode("utf-8"),
-                        filename=get_wireguard_config_filename(referrer_id),
-                    ),
-                    caption="Профиль WireGuard / AmneziaWG",
-                )
+            referrer_native = build_native_access_text_for_user(
+                referrer_id,
+                title="Данные подключения AmneziaWG",
+            )
+            if referrer_native:
+                await callback.bot.send_message(referrer_id, referrer_native, disable_web_page_preview=True)
                 add_peer_to_server(referrer_id)
     except Exception:
         pass
 
     if invitee_record is not None:
-        invitee_config_text = get_wireguard_config_text(user_id)
-        if invitee_config_text:
+        invitee_native = build_native_access_text_for_user(
+            user_id,
+            title="Данные подключения AmneziaWG",
+        )
+        if invitee_native:
             try:
-                await callback.bot.send_document(
-                    user_id,
-                    BufferedInputFile(
-                        invitee_config_text.encode("utf-8"),
-                        filename=get_wireguard_config_filename(user_id),
-                    ),
-                    caption="Профиль WireGuard / AmneziaWG",
-                )
+                await callback.bot.send_message(user_id, invitee_native, disable_web_page_preview=True)
                 add_peer_to_server(user_id)
             except Exception:
                 pass
