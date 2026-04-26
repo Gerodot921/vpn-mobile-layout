@@ -87,6 +87,9 @@ async def on_successful_payment(message: Message) -> None:
     max_configs = TARIFF_MAX_CONFIGS.get(plan_code, 1)
     first_config = None
     remaining_count = 0
+    profile_id = "-"
+    config_text = ""
+    config_filename = ""
     
     if max_configs > 1:
         # Create multiple configs
@@ -133,8 +136,9 @@ async def on_successful_payment(message: Message) -> None:
     
     # Send first config if created
     if first_config and max_configs > 1:
-        config_text = first_config.get("config_text", "")
-        config_filename = first_config.get("config_filename", f"skull-vpn-config.conf")
+        profile_id = str(first_config.get("config_id") or "-")
+        config_text = str(first_config.get("config_text") or "")
+        config_filename = str(first_config.get("config_filename") or "skull-vpn-config.conf")
         
         if config_text:
             try:
@@ -195,7 +199,7 @@ async def on_successful_payment(message: Message) -> None:
         f"Действует до: {expires_at}"
     )
 
-    if config_text:
+    if max_configs == 1 and config_text:
         try:
             await message.bot.send_document(
                 user.id,
