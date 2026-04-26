@@ -26,7 +26,7 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.wireguard import add_peer_to_server, add_peer_to_server_by_values, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
 from app.date_format import format_human_datetime
 
 # Owner ID for admin commands
@@ -218,6 +218,7 @@ def _build_admin_help_lines() -> list[str]:
         "/create <n> <m> — создать n персональных конфигов на m дней",
         "/delete <config_id> — удалить персональный конфиг по ID",
         "/addtarif <username> <tariff> — выдать тариф и отправить конфиг пользователю",
+        "/repairvpn [send] — восстановить peer для всех активных доступов; send = переотправить конфиги",
         "/deletetarif <username> <free|blatnoy|paid> — удалить тариф и его конфиг",
         "/adset <asset_url> [seconds] [click_url] — установить рекламу",
         "/adon — включить рекламу",
@@ -691,6 +692,141 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
             lines.append("Не удалось отправить конфиг пользователю")
     else:
         lines.append("Не удалось сформировать конфиг для отправки пользователю")
+
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command(commands=["repairvpn", "repair_access"]), F.func(_is_owner))
+async def repair_vpn_access_command(message: Message, command: CommandObject | None = None) -> None:
+    args = (command.args or "").strip().lower() if command else ""
+    resend_configs = args in {"send", "notify", "all"}
+
+    active_free = list_active_free_access_records()
+    active_paid = list_active_subscriptions()
+    active_personal = list_active_personal_configs()
+
+    user_ids: set[int] = set(active_free.keys())
+    user_ids.update(active_paid.keys())
+
+    standard_peer_ok = 0
+    standard_peer_fail = 0
+    standard_send_ok = 0
+    standard_send_fail = 0
+
+    personal_peer_ok = 0
+    personal_peer_fail = 0
+    personal_send_ok = 0
+    personal_send_fail = 0
+
+    for user_id in sorted(user_ids):
+        ensure_wireguard_profile(user_id)
+        if add_peer_to_server(user_id):
+            standard_peer_ok += 1
+            if user_id in active_free:
+                mark_free_access_peer_added(user_id)
+        else:
+            standard_peer_fail += 1
+
+        if not resend_configs:
+            continue
+
+        config_text = get_wireguard_config_text(user_id)
+        config_filename = get_wireguard_config_filename(user_id)
+        if not config_text:
+            standard_send_fail += 1
+            continue
+
+        try:
+            await message.bot.send_document(
+                user_id,
+                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                caption="Сервер обновлён. Отправляем актуальный профиль WireGuard / AmneziaWG.",
+            )
+            standard_send_ok += 1
+        except TelegramRetryAfter as exc:
+            await asyncio.sleep(float(exc.retry_after) + 0.1)
+            try:
+                await message.bot.send_document(
+                    user_id,
+                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                    caption="Сервер обновлён. Отправляем актуальный профиль WireGuard / AmneziaWG.",
+                )
+                standard_send_ok += 1
+            except Exception:
+                standard_send_fail += 1
+        except Exception:
+            standard_send_fail += 1
+
+    for record in active_personal:
+        assigned_user_id = record.get("assigned_user_id")
+        if not isinstance(assigned_user_id, int):
+            continue
+
+        public_key = str(record.get("public_key") or "")
+        address = str(record.get("address") or "")
+        preshared_key = str(record.get("preshared_key") or "")
+        if add_peer_to_server_by_values(
+            public_key=public_key,
+            client_address=address,
+            client_preshared_key=preshared_key,
+            user_id=assigned_user_id,
+        ):
+            personal_peer_ok += 1
+        else:
+            personal_peer_fail += 1
+
+        if not resend_configs:
+            continue
+
+        config_text = str(record.get("config_text") or "")
+        config_filename = str(record.get("config_filename") or "skull-vpn-config.conf")
+        if not config_text:
+            personal_send_fail += 1
+            continue
+
+        try:
+            await message.bot.send_document(
+                assigned_user_id,
+                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                caption="Сервер обновлён. Отправляем актуальный персональный профиль WireGuard / AmneziaWG.",
+            )
+            personal_send_ok += 1
+        except TelegramRetryAfter as exc:
+            await asyncio.sleep(float(exc.retry_after) + 0.1)
+            try:
+                await message.bot.send_document(
+                    assigned_user_id,
+                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                    caption="Сервер обновлён. Отправляем актуальный персональный профиль WireGuard / AmneziaWG.",
+                )
+                personal_send_ok += 1
+            except Exception:
+                personal_send_fail += 1
+        except Exception:
+            personal_send_fail += 1
+
+    lines = [
+        "🔧 Восстановление VPN завершено",
+        "",
+        f"Активных free пользователей: {len(active_free)}",
+        f"Активных paid пользователей: {len(active_paid)}",
+        f"Активных персональных конфигов: {len(active_personal)}",
+        "",
+        f"Standard peer: ok={standard_peer_ok}, fail={standard_peer_fail}",
+        f"Personal peer: ok={personal_peer_ok}, fail={personal_peer_fail}",
+    ]
+
+    if resend_configs:
+        lines.extend(
+            [
+                "",
+                f"Standard config send: ok={standard_send_ok}, fail={standard_send_fail}",
+                f"Personal config send: ok={personal_send_ok}, fail={personal_send_fail}",
+            ]
+        )
+    else:
+        lines.append("")
+        lines.append("Подсказка: /repairvpn send — дополнительно переотправит актуальные конфиги пользователям")
 
     await message.answer("\n".join(lines))
 
