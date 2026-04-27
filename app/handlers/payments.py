@@ -2,12 +2,11 @@ import logging
 import os
 
 from aiogram import F, Router
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery
+from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery
 
 from app.subscriptions import extend_subscription
 from app.personal_configs import create_personal_configs, assign_personal_config_to_user, list_active_personal_configs_for_user
 from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
-from app.native_access import build_native_access_text, build_native_access_text_for_user
 from app.date_format import format_human_datetime
 
 router = Router()
@@ -140,10 +139,15 @@ async def on_successful_payment(message: Message) -> None:
         profile_id = str(first_config.get("config_id") or "-")
         config_text = str(first_config.get("config_text") or "")
         config_filename = str(first_config.get("config_filename") or "skull-vpn-config.conf")
-        native_first = build_native_access_text(first_config, title=f"Данные подключения AmneziaWG (1 из {max_configs})")
-        
-        if native_first:
-            await message.answer(native_first, disable_web_page_preview=True)
+
+        if config_text:
+            try:
+                await message.answer_document(
+                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                    caption=f"Конфигуратор 1 из {max_configs}",
+                )
+            except Exception:
+                logging.exception("Failed to send first personal config file")
     elif not first_config and max_configs == 1:
         # For basic tier, send WireGuard profile
         profile = ensure_wireguard_profile(user.id)
@@ -156,14 +160,12 @@ async def on_successful_payment(message: Message) -> None:
 
         if config_text:
             try:
-                native_standard = build_native_access_text_for_user(
-                    user.id,
-                    title="Данные подключения AmneziaWG",
+                await message.answer_document(
+                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                    caption="Ваш конфигуратор во вложении",
                 )
-                if native_standard:
-                    await message.answer(native_standard, disable_web_page_preview=True)
             except Exception:
-                logging.exception("Failed to send native access text")
+                logging.exception("Failed to send WireGuard config file")
 
     username = f"@{user.username}" if user.username else f"user_{user.id}"
     amount_text = f"{payment.total_amount} {payment.currency}"
@@ -195,11 +197,10 @@ async def on_successful_payment(message: Message) -> None:
 
     if max_configs == 1 and config_text:
         try:
-            native_standard = build_native_access_text_for_user(
+            await message.bot.send_document(
                 user.id,
-                title="Данные подключения AmneziaWG",
+                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                caption="Ваш конфигуратор во вложении",
             )
-            if native_standard:
-                await message.bot.send_message(user.id, native_standard, disable_web_page_preview=True)
         except Exception:
-            logging.exception("Failed to send paid subscription native access to user_id=%s", user.id)
+            logging.exception("Failed to send paid subscription config file to user_id=%s", user.id)

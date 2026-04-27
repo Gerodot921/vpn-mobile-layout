@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, quote_plus, urlsplit
 from aiohttp import ClientSession, ClientTimeout, web
 
 from aiogram import Bot
-from aiogram.types import LabeledPrice
+from aiogram.types import BufferedInputFile, LabeledPrice
 
 from app.ads import complete_ad_session, register_ad_click, start_ad_session
 from app.crypto_payments import (
@@ -34,7 +34,7 @@ from app.personal_configs import activate_pending_personal_configs_for_user, lis
 from app.payment_webhooks import log_payment_webhook_event
 from app.wireguard import add_peer_to_server
 from app.wireguard import ensure_wireguard_profile
-from app.native_access import build_native_access_text_for_user
+from app.wireguard import get_wireguard_config_filename, get_wireguard_config_text
 from app.subscriptions import get_remaining_text, get_subscription_plan_name, get_subscription_record, is_subscription_active
 from app.subscriptions import extend_subscription
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
@@ -780,21 +780,19 @@ async def claim_free_access(request: web.Request) -> web.Response:
             )
             try:
                 await bot.send_message(user_id, message_text, disable_web_page_preview=True)
-                native_access = build_native_access_text_for_user(
-                    user_id,
-                    title="Данные подключения AmneziaWG",
-                )
-                if native_access:
-                    await bot.send_message(
+                config_text = get_wireguard_config_text(user_id)
+                config_filename = get_wireguard_config_filename(user_id)
+                if config_text:
+                    await bot.send_document(
                         user_id,
-                        native_access,
-                        disable_web_page_preview=True,
+                        BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                        caption="Ваш конфигуратор во вложении",
                     )
                 else:
-                    logging.warning("Native access text is empty for user_id=%s", user_id)
+                    logging.warning("WireGuard config text is empty for user_id=%s", user_id)
                     await bot.send_message(
                         user_id,
-                        "Не удалось подготовить нативные данные подключения. Напишите /getconf, отправим вручную.",
+                        "Не удалось подготовить конфигуратор автоматически. Напишите /getconf, отправим вручную.",
                         disable_web_page_preview=True,
                     )
             except Exception:
@@ -1095,10 +1093,8 @@ async def payment_cryptocloud_webhook(request: web.Request) -> web.Response:
         expires_at = sub_record.get("expires_at", "-")
         profile = ensure_wireguard_profile(user_id)
         profile_id = profile.get("profile_id", "-") if isinstance(profile, dict) else "-"
-        native_access = build_native_access_text_for_user(
-            user_id,
-            title="Данные подключения AmneziaWG",
-        )
+        config_text = get_wireguard_config_text(user_id)
+        config_filename = get_wireguard_config_filename(user_id)
         add_peer_to_server(user_id)
 
         bot: Bot | None = request.app.get("bot")
@@ -1138,11 +1134,15 @@ async def payment_cryptocloud_webhook(request: web.Request) -> web.Response:
             except Exception:
                 logging.exception("Failed to notify user about CryptoCloud purchase user_id=%s", user_id)
 
-            if native_access:
+            if config_text:
                 try:
-                    await bot.send_message(user_id, native_access, disable_web_page_preview=True)
+                    await bot.send_document(
+                        user_id,
+                        BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+                        caption="Ваш конфигуратор во вложении",
+                    )
                 except Exception:
-                    logging.exception("Failed to send native access after CryptoCloud purchase user_id=%s", user_id)
+                    logging.exception("Failed to send config file after CryptoCloud purchase user_id=%s", user_id)
 
         log_payment_webhook_event(
             provider=provider,

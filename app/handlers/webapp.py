@@ -4,7 +4,7 @@ import json
 import logging
 
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
 from app.free_access import (
     DEFAULT_FREE_ACCESS_HOURS,
@@ -13,8 +13,7 @@ from app.free_access import (
 )
 from app.referrals import ensure_user
 from app.subscriptions import ensure_subscription
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile
-from app.native_access import build_native_access_text_for_user
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
 from app.date_format import format_human_datetime
 
@@ -98,16 +97,17 @@ async def webapp_data(message: Message) -> None:
         return
 
     add_peer_to_server(user_id)
-    native_access = build_native_access_text_for_user(
-        user_id,
-        title="Данные подключения AmneziaWG",
-    )
+    config_text = get_wireguard_config_text(user_id)
+    config_filename = get_wireguard_config_filename(user_id)
 
-    if native_access:
-        await message.answer(native_access, disable_web_page_preview=True)
+    if config_text:
+        await message.answer_document(
+            BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+            caption="Ваш конфигуратор во вложении",
+        )
         return
 
-    logging.warning("Native access text is empty in webapp flow for user_id=%s", user_id)
+    logging.warning("WireGuard config text is empty in webapp flow for user_id=%s", user_id)
     await message.answer(
         "Не удалось подготовить данные подключения автоматически. Напишите /getconf, отправим резервный вариант.",
         disable_web_page_preview=True,
