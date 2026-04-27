@@ -431,6 +431,9 @@ def _derive_public_key(private_key_b64: str) -> str:
 
 
 def _generate_preshared_key() -> str:
+    global_psk = os.getenv("WIREGUARD_GLOBAL_PRESHARED_KEY", "").strip()
+    if global_psk:
+        return global_psk
     return base64.b64encode(secrets.token_bytes(32)).decode("ascii")
 
 
@@ -547,7 +550,9 @@ def _build_profile_filename(profile_id: str) -> str:
 def _build_profile(user_id: int, state: WireGuardState) -> WireGuardProfile:
     private_key = _generate_private_key()
     public_key = _derive_public_key(private_key)
-    preshared_key = _generate_preshared_key()
+    # Use global preshared-key if configured, otherwise generate random
+    global_psk = os.getenv("WIREGUARD_GLOBAL_PRESHARED_KEY", "").strip()
+    preshared_key = global_psk if global_psk else _generate_preshared_key()
     address = _build_address(_next_client_octet(state))
     profile_id = _profile_id()
     created_at = _now_utc().isoformat()
@@ -594,8 +599,14 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
         profile["dns"] = _configured_dns()
         profile["allowed_ips"] = _configured_allowed_ips()
         profile["mtu"] = _configured_mtu()
-        if not profile.get("preshared_key"):
+        
+        # Always use global preshared-key if configured, otherwise generate or keep existing
+        global_psk = os.getenv("WIREGUARD_GLOBAL_PRESHARED_KEY", "").strip()
+        if global_psk:
+            profile["preshared_key"] = global_psk
+        elif not profile.get("preshared_key"):
             profile["preshared_key"] = _generate_preshared_key()
+        
         profile["configured"] = is_wireguard_configured()
         profile["updated_at"] = _now_utc().isoformat()
         profile["config_text"] = _build_config_text(profile)
