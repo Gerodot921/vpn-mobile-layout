@@ -576,6 +576,8 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
                     used_octets.add(octet)
                 continue
 
+            logging.info("Personal config peer added to server: config_id=%s, address=%s", config_id, address)
+
             record: PersonalConfigRecord = {
                 "config_id": config_id,
                 "config_filename": config_filename,
@@ -595,8 +597,13 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
             }
             state[config_id] = record
             created.append(record)
+            logging.info("Personal config record created and added to state: config_id=%s, owner_user_id=%s", config_id, owner_user_id)
 
-        _save_state(state)
+        try:
+            _save_state(state)
+            logging.info("Personal configs saved to DB: total created=%d", len(created))
+        except Exception as e:
+            logging.exception("Failed to save personal configs to DB: error=%s", e)
 
     return created
 
