@@ -832,3 +832,87 @@ def list_peer_endpoints() -> dict[str, str]:
             endpoints[public_key] = endpoint
 
     return endpoints
+
+
+def _run_docker_cmd_output(cmd: list[str]) -> tuple[int, str, str]:
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=10, text=True)
+        return result.returncode, result.stdout or "", result.stderr or ""
+    except Exception as exc:
+        logging.error("Docker exec error: %s", exc)
+        return 1, "", str(exc)
+
+
+def _get_server_peers_dump() -> str | None:
+    """Return raw output of `wg show <iface> dump` from the docker container, or None on error."""
+    docker_bin, docker_container, interface_name = _docker_container_and_iface()
+    if not docker_bin or not docker_container or not interface_name:
+        logging.warning("Docker or interface not configured for getting peers dump")
+        return None
+
+    cmd = [docker_bin, "exec", docker_container, "wg", "show", interface_name, "dump"]
+    rc, out, err = _run_docker_cmd_output(cmd)
+    if rc != 0:
+        logging.error("Failed to get peers dump: %s", err.strip())
+        return None
+    return out
+
+
+def reconcile_user_peer(user_id: int, *, fix: bool = False) -> dict:
+    """Ensure server has a peer matching DB profile for `user_id`.
+
+    Returns a dict with keys: ok(bool), action(str), details(str).
+    If `fix` is True, will remove mismatching peer and add correct one.
+    """
+    profile = get_wireguard_profile(user_id)
+    if profile is None:
+        return {"ok": False, "action": "no_profile", "details": f"No DB profile for user {user_id}"}
+
+    expected_pub = profile.get("public_key") or _derive_public_key(profile["private_key"])
+    address = profile.get("address")
+    dump = _get_server_peers_dump()
+    if dump is None:
+        return {"ok": False, "action": "no_dump", "details": "Cannot read server peers"}
+
+    # parse dump lines: public_key preshared_key endpoint allowedips latest_handshake rx tx
+    found_line = None
+    found_pub = None
+    for line in dump.splitlines():
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        pub = parts[0].strip()
+        allowed = parts[3].strip()
+        if allowed == address:
+            found_line = line
+            found_pub = pub
+            break
+
+    if found_line is None:
+        # peer with address not present
+        if fix:
+            ok = add_peer_to_server_by_values(public_key=expected_pub, client_address=address, client_preshared_key=profile.get("preshared_key", ""), user_id=user_id)
+            return {"ok": ok, "action": "added", "details": f"Added peer {expected_pub} for {address}" if ok else "add_failed"}
+        return {"ok": False, "action": "missing", "details": f"Peer for {address} not found on server"}
+
+    # found peer with same address
+    if found_pub == expected_pub:
+        return {"ok": True, "action": "ok", "details": "Peer present and matches DB"}
+
+    # mismatch: server has different public key for this address
+    if fix:
+        docker_bin, docker_container, interface_name = _docker_container_and_iface()
+        if not docker_bin or not docker_container:
+            return {"ok": False, "action": "no_docker", "details": "Docker not configured"}
+
+        # remove wrong pub
+        cmd_rm = [docker_bin, "exec", docker_container, "wg", "set", interface_name, "peer", found_pub, "remove"]
+        rc_rm, _, err_rm = _run_docker_cmd_output(cmd_rm)
+        if rc_rm != 0:
+            return {"ok": False, "action": "remove_failed", "details": err_rm}
+
+        # add correct
+        ok_add = add_peer_to_server_by_values(public_key=expected_pub, client_address=address, client_preshared_key=profile.get("preshared_key", ""), user_id=user_id)
+        return {"ok": ok_add, "action": "replaced", "details": "replaced_peer" if ok_add else "add_failed"}
+
+    return {"ok": False, "action": "mismatch", "details": f"Server pub {found_pub} != expected {expected_pub}"}
