@@ -547,17 +547,31 @@ def _build_profile(user_id: int, state: WireGuardState) -> WireGuardProfile:
 
 
 def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
+    """Ensure profile exists in DB. If new, create and add peer to server immediately."""
     user_key = _user_key(user_id)
     with _state_lock:
         state = _load_state()
         profile = state["profiles"].get(user_key)
-        if profile is None:
+        is_new = profile is None
+        
+        if is_new:
+            # Create new profile
             profile = _build_profile(user_id, state)
             state["profiles"][user_key] = profile
             _save_state(state)
+            
+            # Add peer to server ATOMICALLY
+            peer_added = add_peer_to_server_by_values(
+                public_key=profile["public_key"],
+                client_address=profile["address"],
+                client_preshared_key=profile.get("preshared_key", ""),
+                user_id=user_id,
+            )
+            if not peer_added:
+                logging.error("Failed to add peer to server for new profile user_id=%s", user_id)
             return profile
 
-        # Migrate legacy low-octet addresses to configured range (e.g. from .2 to .100+).
+        # Update existing profile (migrate old octets, refresh endpoint/params)
         current_octet = _extract_client_octet(profile.get("address", ""))
         start_octet = _configured_start_octet()
         if current_octet is None or current_octet < start_octet:
@@ -568,7 +582,7 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
         profile["allowed_ips"] = _configured_allowed_ips()
         profile["mtu"] = _configured_mtu()
         
-        # Always use global preshared-key if configured, otherwise generate or keep existing
+        # Always use global preshared-key if configured, otherwise keep existing
         global_psk = os.getenv("WIREGUARD_GLOBAL_PRESHARED_KEY", "").strip()
         if global_psk:
             profile["preshared_key"] = global_psk
@@ -763,20 +777,38 @@ def remove_peer_from_server(public_key: str, user_id: int) -> bool:
 
 
 def reset_wireguard_profile(user_id: int) -> WireGuardProfile:
+    """Delete old profile (and remove peer from server), then create new one."""
     user_key = _user_key(user_id)
     with _state_lock:
         state = _load_state()
         old_profile = state["profiles"].get(user_key)
+        
         if old_profile is not None:
-            remove_peer_from_server(old_profile.get("public_key", ""), user_id)
-
+            # Remove old peer from server FIRST
+            old_pub = old_profile.get("public_key", "")
+            if old_pub:
+                remove_peer_from_server(old_pub, user_id)
+        
+        # Create new profile
         profile = _build_profile(user_id, state)
         state["profiles"][user_key] = profile
         _save_state(state)
+        
+        # Add new peer to server ATOMICALLY
+        peer_added = add_peer_to_server_by_values(
+            public_key=profile["public_key"],
+            client_address=profile["address"],
+            client_preshared_key=profile.get("preshared_key", ""),
+            user_id=user_id,
+        )
+        if not peer_added:
+            logging.error("Failed to add peer to server for reset profile user_id=%s", user_id)
+        
         return profile
 
 
 def delete_wireguard_profile(user_id: int) -> WireGuardProfile | None:
+    """Remove profile from DB and remove peer from server atomically."""
     user_key = _user_key(user_id)
     with _state_lock:
         state = _load_state()
@@ -785,6 +817,7 @@ def delete_wireguard_profile(user_id: int) -> WireGuardProfile | None:
             return None
         _save_state(state)
 
+    # Remove peer from server AFTER DB update
     old_public_key = profile.get("public_key", "")
     if old_public_key:
         remove_peer_from_server(old_public_key, user_id)
@@ -916,3 +949,52 @@ def reconcile_user_peer(user_id: int, *, fix: bool = False) -> dict:
         return {"ok": ok_add, "action": "replaced", "details": "replaced_peer" if ok_add else "add_failed"}
 
     return {"ok": False, "action": "mismatch", "details": f"Server pub {found_pub} != expected {expected_pub}"}
+
+
+def sync_all_peers_on_startup() -> dict:
+    """Reconcile ALL DB profiles with server peers. Call once at bot startup.
+    
+    Returns dict with keys: ok(bool), synced(int), fixed(int), removed(int), errors(list).
+    """
+    state = _load_state()
+    synced, fixed, removed = 0, 0, 0
+    errors = []
+    
+    # Fix all DB profiles to match server
+    for user_key, profile in state.get("profiles", {}).items():
+        try:
+            uid = int(user_key)
+            res = reconcile_user_peer(uid, fix=True)
+            if res["ok"]:
+                if res["action"] == "ok":
+                    synced += 1
+                elif res["action"] in ("added", "replaced"):
+                    fixed += 1
+            else:
+                errors.append(f"user {uid}: {res['action']}")
+        except Exception as e:
+            errors.append(f"user {user_key}: {str(e)}")
+    
+    # Find and remove orphaned peers on server (those not in DB)
+    dump = _get_server_peers_dump()
+    if dump:
+        db_addresses = set()
+        for profile in state.get("profiles", {}).values():
+            addr = profile.get("address")
+            if addr:
+                db_addresses.add(addr)
+        
+        for line in dump.splitlines():
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            pub_key = parts[0].strip()
+            address = parts[3].strip()
+            if address not in db_addresses and address != "(none)":
+                # Remove orphaned peer
+                if remove_peer_from_server(pub_key, user_id=0):
+                    removed += 1
+                else:
+                    errors.append(f"failed to remove orphaned peer {address} ({pub_key})")
+    
+    return {"ok": len(errors) == 0, "synced": synced, "fixed": fixed, "removed": removed, "errors": errors}

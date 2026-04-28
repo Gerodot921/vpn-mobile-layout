@@ -556,12 +556,17 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
             config_filename = f"skull-vpn-{config_id}.conf"
             config_text = _build_config_text(private_key, preshared_key, address)
 
+            # Add peer to server BEFORE saving to DB to ensure atomicity
             added_to_server = add_peer_to_server_by_values(
                 public_key=public_key,
                 client_address=address,
                 client_preshared_key=preshared_key,
                 user_id=0,
             )
+            
+            if not added_to_server:
+                import logging
+                logging.error("Failed to add personal config peer to server: address=%s, public_key=%s", address, public_key)
 
             record: PersonalConfigRecord = {
                 "config_id": config_id,

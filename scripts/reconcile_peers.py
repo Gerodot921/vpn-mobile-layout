@@ -44,11 +44,17 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--user", type=int, help="User ID to reconcile")
     p.add_argument("--all", action="store_true", help="Reconcile all DB profiles")
+    p.add_argument("--sync", action="store_true", help="Full sync on startup (fix all profiles + remove orphans)")
     p.add_argument("--fix", action="store_true", help="Apply fixes (remove/add) rather than dry-run")
     args = p.parse_args()
 
+    if args.sync:
+        res = wireguard.sync_all_peers_on_startup()
+        print("Sync result:", res)
+        return
+
     if not args.user and not args.all:
-        p.error("--user or --all required")
+        p.error("--user, --all, or --sync required")
 
     if args.user:
         res = wireguard.reconcile_user_peer(args.user, fix=args.fix)
@@ -56,10 +62,10 @@ def main():
         return
 
     state = wireguard._load_state()
-    for user_key, profile in state.get("profiles", {}).items():
+    for user_key, profile in state.get('profiles', {}).items():
         uid = int(user_key)
         res = wireguard.reconcile_user_peer(uid, fix=args.fix)
-        print(uid, res)
+        print(f"{uid}: {res}")
 
 
 if __name__ == "__main__":
