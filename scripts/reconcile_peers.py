@@ -5,7 +5,15 @@ Usage:
   python scripts/reconcile_peers.py --user 12345 --fix
   python scripts/reconcile_peers.py --all --dry-run
 """
+import os
+import sys
 import argparse
+
+# Ensure project root is on sys.path so `from app import wireguard` works
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 from app import wireguard
 
 
