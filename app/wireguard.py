@@ -16,7 +16,7 @@ from typing import Any, TypedDict
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import STORAGE_DB_PATH, get_storage_connection, load_json_file
+from app.json_storage import get_storage_connection
 
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
 WIREGUARD_STATE_TABLE = "wireguard_state"
@@ -229,42 +229,10 @@ def _ensure_seeded() -> None:
         if state_exists and int(state_exists[0]) > 0 and profiles_exist and int(profiles_exist[0]) > 0:
             _seed_checked = True
             return
-
-        raw_data = load_json_file(WIREGUARD_STORAGE_PATH, _state_default())
-        state = _state_from_json(raw_data)
-
         connection.execute(
             f"INSERT OR REPLACE INTO {WIREGUARD_STATE_TABLE} (id, next_client_octet) VALUES (1, ?)",
-            (int(state.get("next_client_octet", DEFAULT_CLIENT_START_OCTET)),),
+            (DEFAULT_CLIENT_START_OCTET,),
         )
-
-        for user_key, profile in state.get("profiles", {}).items():
-            if not isinstance(profile, dict):
-                continue
-            connection.execute(
-                f"""
-                INSERT OR REPLACE INTO {WIREGUARD_PROFILES_TABLE}
-                (user_id, profile_id, private_key, public_key, preshared_key, address, endpoint, dns, allowed_ips, mtu, configured, created_at, updated_at, config_text, config_filename)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    user_key,
-                    str(profile.get("profile_id") or ""),
-                    str(profile.get("private_key") or ""),
-                    str(profile.get("public_key") or ""),
-                    str(profile.get("preshared_key") or ""),
-                    str(profile.get("address") or ""),
-                    str(profile.get("endpoint") or ""),
-                    str(profile.get("dns") or ""),
-                    str(profile.get("allowed_ips") or ""),
-                    int(profile.get("mtu", DEFAULT_MTU)) if isinstance(profile.get("mtu", DEFAULT_MTU), int) else DEFAULT_MTU,
-                    1 if bool(profile.get("configured", False)) else 0,
-                    str(profile.get("created_at") or _now_utc().isoformat()),
-                    str(profile.get("updated_at") or _now_utc().isoformat()),
-                    str(profile.get("config_text") or ""),
-                    str(profile.get("config_filename") or _build_profile_filename(str(profile.get("profile_id") or "WG"))),
-                ),
-            )
 
         connection.commit()
     _seed_checked = True
@@ -634,6 +602,19 @@ def get_wireguard_config_filename(user_id: int) -> str:
     if profile is None:
         return "skull-vpn-wireguard.conf"
     return profile["config_filename"]
+
+
+def get_wireguard_config_payload(user_id: int) -> tuple[str, bytes] | None:
+    profile = get_wireguard_profile(user_id)
+    if profile is None:
+        return None
+
+    config_text = profile.get("config_text", "")
+    if not config_text:
+        return None
+
+    filename = profile.get("config_filename") or "skull-vpn-wireguard.conf"
+    return filename, config_text.encode("utf-8")
 
 
 def _docker_executable() -> str | None:

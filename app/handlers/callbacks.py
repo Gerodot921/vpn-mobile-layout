@@ -16,7 +16,8 @@ from app.keyboards.inline import (
     support_inline_keyboard,
 )
 from app.referrals import activate_user_and_apply_bonus, ensure_user
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
+from app.wireguard import add_peer_to_server, get_wireguard_config_payload
+from app.native_access import build_native_access_text_for_user
 from app.texts import (
     CONNECTED_TEXT,
     DEMO_LINK_TEXT,
@@ -98,31 +99,29 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
                 ),
                 disable_web_page_preview=True,
             )
-            ensure_wireguard_profile(referrer_id)
-            referrer_config_text = get_wireguard_config_text(referrer_id)
-            referrer_config_filename = get_wireguard_config_filename(referrer_id)
-            if referrer_config_text:
+            add_peer_to_server(referrer_id)
+            payload = get_wireguard_config_payload(referrer_id)
+            if payload is not None:
+                filename, content = payload
                 await callback.bot.send_document(
                     referrer_id,
-                    BufferedInputFile(referrer_config_text.encode("utf-8"), filename=referrer_config_filename),
-                    caption="Ваш конфигуратор во вложении",
+                    BufferedInputFile(content, filename=filename),
+                    caption="Данные подключения AmneziaWG",
                 )
-                add_peer_to_server(referrer_id)
     except Exception:
         pass
 
     if invitee_record is not None:
-        ensure_wireguard_profile(user_id)
-        invitee_config_text = get_wireguard_config_text(user_id)
-        invitee_config_filename = get_wireguard_config_filename(user_id)
-        if invitee_config_text:
+        add_peer_to_server(user_id)
+        payload = get_wireguard_config_payload(user_id)
+        if payload is not None:
             try:
+                filename, content = payload
                 await callback.bot.send_document(
                     user_id,
-                    BufferedInputFile(invitee_config_text.encode("utf-8"), filename=invitee_config_filename),
-                    caption="Ваш конфигуратор во вложении",
+                    BufferedInputFile(content, filename=filename),
+                    caption="Данные подключения AmneziaWG",
                 )
-                add_peer_to_server(user_id)
             except Exception:
                 pass
 

@@ -6,7 +6,8 @@ from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboar
 
 from app.subscriptions import extend_subscription
 from app.personal_configs import create_personal_configs, assign_personal_config_to_user, list_active_personal_configs_for_user
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_payload
+from app.native_access import build_native_access_text, build_native_access_text_for_user
 from app.date_format import format_human_datetime
 
 router = Router()
@@ -139,33 +140,25 @@ async def on_successful_payment(message: Message) -> None:
         profile_id = str(first_config.get("config_id") or "-")
         config_text = str(first_config.get("config_text") or "")
         config_filename = str(first_config.get("config_filename") or "skull-vpn-config.conf")
-
-        if config_text:
-            try:
-                await message.answer_document(
-                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                    caption=f"Конфигуратор 1 из {max_configs}",
-                )
-            except Exception:
-                logging.exception("Failed to send first personal config file")
+        await message.answer_document(
+            BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
+            caption=f"Данные подключения AmneziaWG (1 из {max_configs})",
+        )
     elif not first_config and max_configs == 1:
         # For basic tier, send WireGuard profile
         profile = ensure_wireguard_profile(user.id)
         profile_id = profile.get("profile_id", "-") if profile else "-"
-        config_filename = get_wireguard_config_filename(user.id)
-        config_text = get_wireguard_config_text(user.id)
 
         if profile is not None:
             add_peer_to_server(user.id)
 
-        if config_text:
-            try:
-                await message.answer_document(
-                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                    caption="Ваш конфигуратор во вложении",
-                )
-            except Exception:
-                logging.exception("Failed to send WireGuard config file")
+        payload = get_wireguard_config_payload(user.id)
+        if payload is not None:
+            filename, content = payload
+            await message.answer_document(
+                BufferedInputFile(content, filename=filename),
+                caption="Данные подключения AmneziaWG",
+            )
 
     username = f"@{user.username}" if user.username else f"user_{user.id}"
     amount_text = f"{payment.total_amount} {payment.currency}"
@@ -195,12 +188,12 @@ async def on_successful_payment(message: Message) -> None:
         f"Действует до: {expires_at}"
     )
 
-    if max_configs == 1 and config_text:
-        try:
+    if max_configs == 1:
+        payload = get_wireguard_config_payload(user.id)
+        if payload is not None:
+            filename, content = payload
             await message.bot.send_document(
                 user.id,
-                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                caption="Ваш конфигуратор во вложении",
+                BufferedInputFile(content, filename=filename),
+                caption="Данные подключения AmneziaWG",
             )
-        except Exception:
-            logging.exception("Failed to send paid subscription config file to user_id=%s", user.id)

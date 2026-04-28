@@ -26,7 +26,8 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, add_peer_to_server_by_values, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.wireguard import add_peer_to_server, add_peer_to_server_by_values, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_payload, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.native_access import build_native_access_text, build_native_access_text_for_user
 from app.date_format import format_human_datetime
 
 # Owner ID for admin commands
@@ -353,15 +354,15 @@ async def send_wireguard_profile(message: Message) -> None:
     if not peer_added:
         logging.warning("Peer was not added before sending profile for user_id=%s", user_id)
 
-    config_text = get_wireguard_config_text(user_id)
-    config_filename = get_wireguard_config_filename(user_id)
-    if not config_text:
-        await message.answer("Не удалось собрать данные подключения. Попробуйте ещё раз через 10 секунд.")
+    payload = get_wireguard_config_payload(user_id)
+    if payload is None:
+        await message.answer("Не удалось собрать конфиг подключения. Попробуйте ещё раз через 10 секунд.")
         return
 
+    filename, content = payload
     await message.answer_document(
-        BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-        caption="Ваш конфигуратор во вложении",
+        BufferedInputFile(content, filename=filename),
+        caption="Данные подключения AmneziaWG",
     )
 
 
@@ -594,8 +595,8 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         return
 
     lines: list[str] = [f"Пользователь: @{username_arg} | id={target_user_id}"]
-    config_text_to_send: str | None = None
-    config_filename_to_send: str = "skull-vpn-wireguard.conf"
+    delivery_document: tuple[str, bytes] | None = None
+    delivery_caption = "Данные подключения AmneziaWG"
 
     if tariff_arg == "free":
         record, created = grant_free_access(
@@ -610,8 +611,7 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
 
         lines.append(f"Выдан тариф: free ({'новый' if created else 'продлён'})")
         lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
-        config_text_to_send = get_wireguard_config_text(target_user_id)
-        config_filename_to_send = get_wireguard_config_filename(target_user_id)
+        delivery_document = get_wireguard_config_payload(target_user_id)
 
     elif tariff_arg == "blatnoy":
         active_configs = list_active_personal_configs()
@@ -639,8 +639,10 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         lines.append("Выдан тариф: blatnoy")
         lines.append(f"Config ID: {target_config.get('config_id', '-')}")
         lines.append(f"До: {_fmt_dt(target_config.get('expires_at', '-'))}")
-        config_text_to_send = str(target_config.get("config_text") or "")
-        config_filename_to_send = str(target_config.get("config_filename") or "skull-vpn-config.conf")
+        config_text = str(target_config.get("config_text") or "")
+        config_filename = str(target_config.get("config_filename") or "skull-vpn-config.conf")
+        if config_text:
+            delivery_document = (config_filename, config_text.encode("utf-8"))
 
     else:
         if tariff_arg == "paid":
@@ -661,20 +663,19 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         lines.append("Выдан тариф: paid")
         lines.append(f"План: {plan_name}")
         lines.append(f"До: {_fmt_dt(record.get('expires_at', '-'))}")
-        config_text_to_send = get_wireguard_config_text(target_user_id)
-        config_filename_to_send = get_wireguard_config_filename(target_user_id)
+        delivery_document = get_wireguard_config_payload(target_user_id)
 
-    if not config_text_to_send:
+    if delivery_document is None and tariff_arg != "blatnoy":
         ensure_wireguard_profile(target_user_id)
-        config_text_to_send = get_wireguard_config_text(target_user_id)
-        config_filename_to_send = get_wireguard_config_filename(target_user_id)
+        delivery_document = get_wireguard_config_payload(target_user_id)
 
-    if config_text_to_send:
+    if delivery_document is not None:
         try:
+            filename, content = delivery_document
             await message.bot.send_document(
                 target_user_id,
-                BufferedInputFile(config_text_to_send.encode("utf-8"), filename=config_filename_to_send),
-                caption="Ваш тариф назначен администратором. Конфигуратор во вложении.",
+                BufferedInputFile(content, filename=filename),
+                caption="Ваш тариф назначен администратором. Ниже данные подключения.",
             )
             lines.append("Данные подключения отправлены пользователю")
         except Exception:
@@ -720,26 +721,27 @@ async def repair_vpn_access_command(message: Message, command: CommandObject | N
         if not resend_configs:
             continue
 
-        config_text = get_wireguard_config_text(user_id)
-        config_filename = get_wireguard_config_filename(user_id)
-        if not config_text:
+        payload = get_wireguard_config_payload(user_id)
+        if payload is None:
             standard_send_fail += 1
             continue
 
         try:
+            filename, content = payload
             await message.bot.send_document(
                 user_id,
-                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                caption="Сервер обновлён. Актуальный конфигуратор во вложении.",
+                BufferedInputFile(content, filename=filename),
+                caption="Сервер обновлён. Отправляем актуальные данные подключения.",
             )
             standard_send_ok += 1
         except TelegramRetryAfter as exc:
             await asyncio.sleep(float(exc.retry_after) + 0.1)
             try:
+                filename, content = payload
                 await message.bot.send_document(
                     user_id,
-                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                    caption="Сервер обновлён. Актуальный конфигуратор во вложении.",
+                    BufferedInputFile(content, filename=filename),
+                    caption="Сервер обновлён. Отправляем актуальные данные подключения.",
                 )
                 standard_send_ok += 1
             except Exception:
@@ -768,26 +770,28 @@ async def repair_vpn_access_command(message: Message, command: CommandObject | N
         if not resend_configs:
             continue
 
-        config_text = str(record.get("config_text") or "")
-        config_filename = str(record.get("config_filename") or "skull-vpn-config.conf")
-        if not config_text:
+        native_access = build_native_access_text(
+            record,
+            title="Данные подключения AmneziaWG",
+        )
+        if not native_access:
             personal_send_fail += 1
             continue
 
         try:
-            await message.bot.send_document(
+            await message.bot.send_message(
                 assigned_user_id,
-                BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                caption="Сервер обновлён. Актуальный персональный конфигуратор во вложении.",
+                "Сервер обновлён. Отправляем актуальные персональные данные подключения.\n\n" + native_access,
+                disable_web_page_preview=True,
             )
             personal_send_ok += 1
         except TelegramRetryAfter as exc:
             await asyncio.sleep(float(exc.retry_after) + 0.1)
             try:
-                await message.bot.send_document(
+                await message.bot.send_message(
                     assigned_user_id,
-                    BufferedInputFile(config_text.encode("utf-8"), filename=config_filename),
-                    caption="Сервер обновлён. Актуальный персональный конфигуратор во вложении.",
+                    "Сервер обновлён. Отправляем актуальные персональные данные подключения.\n\n" + native_access,
+                    disable_web_page_preview=True,
                 )
                 personal_send_ok += 1
             except Exception:
@@ -1077,7 +1081,7 @@ async def webhook_stats_command(message: Message, command: CommandObject | None 
         await message.answer("Webhook-событий пока нет")
         return
 
-    lines: list[str] = ["🪝 Webhook-логи оплат", ""]
+    lines: list[str] = ["🧾 Webhook события оплат", ""]
     for event in events:
         event_id = int(event.get("id") or 0)
         status = str(event.get("status") or "-")

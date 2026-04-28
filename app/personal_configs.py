@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import STORAGE_DB_PATH, get_storage_connection, load_json_file
+from app.json_storage import get_storage_connection, load_json_file
 from app.wireguard import add_peer_to_server_by_values, remove_peer_from_server
 
 PERSONAL_CONFIGS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_configs.json"
@@ -311,20 +311,6 @@ def _extract_client_octet(address: str) -> int | None:
 
 def _collect_used_octets(prefix: str) -> set[int]:
     used: set[int] = set()
-
-    wg_data = load_json_file(WIREGUARD_STORAGE_PATH, {})
-    if isinstance(wg_data, dict):
-        profiles = wg_data.get("profiles", {})
-        if isinstance(profiles, dict):
-            for value in profiles.values():
-                if not isinstance(value, dict):
-                    continue
-                address = value.get("address")
-                if not isinstance(address, str) or not address.startswith(f"{prefix}."):
-                    continue
-                octet = _extract_client_octet(address)
-                if octet is not None:
-                    used.add(octet)
 
     state = _load_state()
     for record in state.values():
