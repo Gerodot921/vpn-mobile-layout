@@ -575,7 +575,8 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
                 octet = _extract_client_octet(address)
                 if octet is not None:
                     used_octets.add(octet)
-                continue
+                   # Do NOT add to state/DB if peer addition failed
+                   continue
 
             logging.info("Personal config peer added to server: config_id=%s, address=%s", config_id, address)
 
@@ -589,7 +590,7 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
                 "preshared_key": preshared_key,
                 "created_at": now.isoformat(),
                 "expires_at": expires_at,
-                "added_to_server": bool(added_to_server),
+                   "added_to_server": True,  # Only reach here if peer was added
                 "revoked_at": None,
                 "assigned_user_id": None,
                 "assigned_username": None,
