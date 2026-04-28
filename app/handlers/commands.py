@@ -26,7 +26,7 @@ from app.texts import (
     MINI_APP_NOT_CONFIGURED_TEXT,
     SUBSCRIPTION_REMINDER_TEXT_TEMPLATE,
 )
-from app.wireguard import add_peer_to_server, add_peer_to_server_by_values, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_payload, get_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
+from app.wireguard import add_peer_to_server, add_peer_to_server_by_values, delete_wireguard_profile, ensure_wireguard_profile, get_wireguard_config_payload, get_wireguard_profile, issue_wireguard_profile, list_peer_endpoints, reset_wireguard_profile
 from app.native_access import build_native_access_text, build_native_access_text_for_user
 from app.date_format import format_human_datetime
 
@@ -605,8 +605,8 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
             source="admin_addtarif",
             force_extend=True,
         )
-        ensure_wireguard_profile(target_user_id)
-        if add_peer_to_server(target_user_id):
+        profile = issue_wireguard_profile(target_user_id)
+        if profile is not None:
             mark_free_access_peer_added(target_user_id)
 
         lines.append(f"Выдан тариф: free ({'новый' if created else 'продлён'})")
@@ -657,8 +657,7 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
             return
 
         record = extend_subscription(target_user_id, 30, plan_name=plan_name)
-        ensure_wireguard_profile(target_user_id)
-        add_peer_to_server(target_user_id)
+        issue_wireguard_profile(target_user_id)
 
         lines.append("Выдан тариф: paid")
         lines.append(f"План: {plan_name}")
@@ -666,7 +665,7 @@ async def add_tarif_command(message: Message, command: CommandObject | None = No
         delivery_document = get_wireguard_config_payload(target_user_id)
 
     if delivery_document is None and tariff_arg != "blatnoy":
-        ensure_wireguard_profile(target_user_id)
+        issue_wireguard_profile(target_user_id)
         delivery_document = get_wireguard_config_payload(target_user_id)
 
     if delivery_document is not None:

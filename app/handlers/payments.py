@@ -6,7 +6,7 @@ from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboar
 
 from app.subscriptions import extend_subscription
 from app.personal_configs import create_personal_configs, assign_personal_config_to_user, list_active_personal_configs_for_user
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_payload
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_payload, issue_wireguard_profile
 from app.native_access import build_native_access_text, build_native_access_text_for_user
 from app.date_format import format_human_datetime
 
@@ -146,11 +146,8 @@ async def on_successful_payment(message: Message) -> None:
         )
     elif not first_config and max_configs == 1:
         # For basic tier, send WireGuard profile
-        profile = ensure_wireguard_profile(user.id)
+        profile = issue_wireguard_profile(user.id)
         profile_id = profile.get("profile_id", "-") if profile else "-"
-
-        if profile is not None:
-            add_peer_to_server(user.id)
 
         payload = get_wireguard_config_payload(user.id)
         if payload is not None:

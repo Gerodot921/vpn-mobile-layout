@@ -470,6 +470,8 @@ def assign_personal_config_to_user(config_id: str, user_id: int, username: str |
         record = state.get(config_id)
         if record is None:
             return False
+        if not record.get("added_to_server"):
+            return False
 
         record["assigned_user_id"] = user_id
         record["assigned_username"] = username.strip().lstrip("@") if isinstance(username, str) and username.strip() else None
@@ -485,6 +487,8 @@ def list_pending_personal_configs_for_user(user_id: int) -> list[PersonalConfigR
     pending: list[PersonalConfigRecord] = []
     for record in list_personal_configs():
         if record.get("owner_user_id") != user_id:
+            continue
+        if not record.get("added_to_server"):
             continue
         if record.get("assigned_user_id") is not None:
             continue
@@ -517,6 +521,8 @@ def get_active_personal_config_for_user(user_id: int) -> PersonalConfigRecord | 
     candidates: list[PersonalConfigRecord] = []
     for record in state.values():
         if record.get("assigned_user_id") != user_id:
+            continue
+        if not record.get("added_to_server"):
             continue
         if record.get("revoked_at"):
             continue
@@ -556,17 +562,19 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
             config_filename = f"skull-vpn-{config_id}.conf"
             config_text = _build_config_text(private_key, preshared_key, address)
 
-            # Add peer to server BEFORE saving to DB to ensure atomicity
+            # Add peer to server BEFORE saving to DB to ensure atomicity.
             added_to_server = add_peer_to_server_by_values(
                 public_key=public_key,
                 client_address=address,
                 client_preshared_key=preshared_key,
                 user_id=0,
             )
-            
             if not added_to_server:
-                import logging
                 logging.error("Failed to add personal config peer to server: address=%s, public_key=%s", address, public_key)
+                octet = _extract_client_octet(address)
+                if octet is not None:
+                    used_octets.add(octet)
+                continue
 
             record: PersonalConfigRecord = {
                 "config_id": config_id,
@@ -603,6 +611,8 @@ def list_active_personal_configs() -> list[PersonalConfigRecord]:
     now = _now_utc()
     active: list[PersonalConfigRecord] = []
     for record in list_personal_configs():
+        if not record.get("added_to_server"):
+            continue
         if record.get("revoked_at"):
             continue
         try:

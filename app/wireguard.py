@@ -557,8 +557,6 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
         if is_new:
             # Create new profile
             profile = _build_profile(user_id, state)
-            state["profiles"][user_key] = profile
-            _save_state(state)
             
             # Add peer to server ATOMICALLY
             peer_added = add_peer_to_server_by_values(
@@ -569,6 +567,10 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
             )
             if not peer_added:
                 logging.error("Failed to add peer to server for new profile user_id=%s", user_id)
+                return profile
+
+            state["profiles"][user_key] = profile
+            _save_state(state)
             return profile
 
         # Update existing profile (migrate old octets, refresh endpoint/params)
@@ -595,6 +597,38 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
         state["profiles"][user_key] = profile
         _save_state(state)
         return profile
+
+
+def issue_wireguard_profile(user_id: int) -> WireGuardProfile | None:
+    """Create a fresh WireGuard profile for an existing user and replace the old one.
+
+    This is the safe path for config issuance: it always rotates keys and filename,
+    then adds the new peer first and persists it only after the server accepts it.
+    """
+    user_key = _user_key(user_id)
+    with _state_lock:
+        state = _load_state()
+        old_profile = state["profiles"].get(user_key)
+        old_public_key = str(old_profile.get("public_key") or "") if isinstance(old_profile, dict) else ""
+
+        new_profile = _build_profile(user_id, state)
+        added = add_peer_to_server_by_values(
+            public_key=new_profile["public_key"],
+            client_address=new_profile["address"],
+            client_preshared_key=new_profile.get("preshared_key", ""),
+            user_id=user_id,
+        )
+        if not added:
+            logging.error("Failed to issue fresh WireGuard profile for user_id=%s", user_id)
+            return None
+
+        state["profiles"][user_key] = new_profile
+        _save_state(state)
+
+    if old_public_key and old_public_key != new_profile["public_key"]:
+        remove_peer_from_server(old_public_key, user_id)
+
+    return new_profile
 
 
 def get_wireguard_profile(user_id: int) -> WireGuardProfile | None:

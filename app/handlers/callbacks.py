@@ -16,7 +16,7 @@ from app.keyboards.inline import (
     support_inline_keyboard,
 )
 from app.referrals import activate_user_and_apply_bonus, ensure_user
-from app.wireguard import add_peer_to_server, get_wireguard_config_payload
+from app.wireguard import add_peer_to_server, get_wireguard_config_payload, issue_wireguard_profile
 from app.native_access import build_native_access_text_for_user
 from app.texts import (
     CONNECTED_TEXT,
@@ -99,7 +99,7 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
                 ),
                 disable_web_page_preview=True,
             )
-            add_peer_to_server(referrer_id)
+            issue_wireguard_profile(referrer_id)
             payload = get_wireguard_config_payload(referrer_id)
             if payload is not None:
                 filename, content = payload
@@ -112,7 +112,7 @@ async def _apply_referral_bonus_if_needed(callback: CallbackQuery) -> None:
         pass
 
     if invitee_record is not None:
-        add_peer_to_server(user_id)
+        issue_wireguard_profile(user_id)
         payload = get_wireguard_config_payload(user_id)
         if payload is not None:
             try:

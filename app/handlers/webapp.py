@@ -13,7 +13,7 @@ from app.free_access import (
 )
 from app.referrals import ensure_user
 from app.subscriptions import ensure_subscription
-from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text
+from app.wireguard import add_peer_to_server, ensure_wireguard_profile, get_wireguard_config_filename, get_wireguard_config_text, issue_wireguard_profile
 from app.texts import FREE_ACCESS_ACTIVE_TEXT_TEMPLATE, FREE_ACCESS_GRANTED_TEXT_TEMPLATE
 from app.date_format import format_human_datetime
 
@@ -96,7 +96,15 @@ async def webapp_data(message: Message) -> None:
     if extend_requested:
         return
 
-    add_peer_to_server(user_id)
+    profile = issue_wireguard_profile(user_id)
+    if profile is None:
+        logging.warning("Failed to issue fresh WireGuard profile in webapp flow for user_id=%s", user_id)
+        await message.answer(
+            "Не удалось подготовить данные подключения автоматически. Напишите /getconf, отправим резервный вариант.",
+            disable_web_page_preview=True,
+        )
+        return
+
     config_text = get_wireguard_config_text(user_id)
     config_filename = get_wireguard_config_filename(user_id)
 
