@@ -1,35 +1,23 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import os
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from threading import Lock
 from typing import Any, TypedDict
 
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from app.json_storage import get_storage_connection, load_json_file
-from app.wireguard import add_peer_to_server_by_values, remove_peer_from_server
+from app.json_storage import get_storage_connection
+from app.wireguard import add_peer_to_server_by_values, remove_peer_from_server, reserve_client_address
 
-PERSONAL_CONFIGS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_configs.json"
-WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
 PERSONAL_CONFIGS_TABLE = "personal_configs"
-
-DEFAULT_ENDPOINT_PORT = 51820
-DEFAULT_CLIENT_NETWORK_PREFIX = "10.66.66"
-DEFAULT_CLIENT_START_OCTET = 2
 DEFAULT_ALLOWED_IPS = "0.0.0.0/0"
 DEFAULT_DNS = "1.1.1.1, 8.8.8.8"
 DEFAULT_MTU = 1280
-
-_state_lock = Lock()
-_seed_checked = False
 
 
 class PersonalConfigRecord(TypedDict):
@@ -48,9 +36,6 @@ class PersonalConfigRecord(TypedDict):
     assigned_username: str | None
     assigned_at: str | None
     owner_user_id: int | None
-
-
-PersonalConfigsState = dict[str, PersonalConfigRecord]
 
 
 def _now_utc() -> datetime:
@@ -87,25 +72,19 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
-    existing_columns = {
-        str(row[1])
-        for row in connection.execute(f"PRAGMA table_info({PERSONAL_CONFIGS_TABLE})").fetchall()
-    }
-    if "owner_user_id" not in existing_columns:
-        connection.execute(f"ALTER TABLE {PERSONAL_CONFIGS_TABLE} ADD COLUMN owner_user_id INTEGER")
     connection.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{PERSONAL_CONFIGS_TABLE}_assigned_user_id ON {PERSONAL_CONFIGS_TABLE}(assigned_user_id)"
     )
     connection.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{PERSONAL_CONFIGS_TABLE}_expires_at ON {PERSONAL_CONFIGS_TABLE}(expires_at)"
     )
+    connection.commit()
     return connection
 
 
-def _row_to_record(row: tuple[Any, ...]) -> tuple[str, PersonalConfigRecord]:
-    config_id = str(row[0])
-    return config_id, {
-        "config_id": config_id,
+def _row_to_record(row: tuple[Any, ...]) -> PersonalConfigRecord:
+    return {
+        "config_id": str(row[0]),
         "config_filename": str(row[1]),
         "config_text": str(row[2]),
         "address": str(row[3]),
@@ -115,237 +94,12 @@ def _row_to_record(row: tuple[Any, ...]) -> tuple[str, PersonalConfigRecord]:
         "created_at": str(row[7]),
         "expires_at": str(row[8]),
         "added_to_server": bool(row[9]),
-        "revoked_at": str(row[10]) if row[10] is not None else None,
+        "revoked_at": str(row[10]) if row[10] else None,
         "assigned_user_id": int(row[11]) if row[11] is not None else None,
-        "assigned_username": str(row[12]) if isinstance(row[12], str) and row[12] else None,
-        "assigned_at": str(row[13]) if row[13] is not None else None,
-        "owner_user_id": int(row[14]) if len(row) > 14 and row[14] is not None else None,
+        "assigned_username": str(row[12]) if row[12] else None,
+        "assigned_at": str(row[13]) if row[13] else None,
+        "owner_user_id": int(row[14]) if row[14] is not None else None,
     }
-
-
-def _encode_state_value(record: PersonalConfigRecord) -> tuple[Any, ...]:
-    return (
-        record.get("config_filename") or "",
-        record.get("config_text") or "",
-        record.get("address") or "",
-        record.get("public_key") or "",
-        record.get("private_key") or "",
-        record.get("preshared_key") or "",
-        record.get("created_at") or _now_utc().isoformat(),
-        record.get("expires_at") or _now_utc().isoformat(),
-        1 if bool(record.get("added_to_server", False)) else 0,
-        record.get("revoked_at"),
-        record.get("assigned_user_id"),
-        record.get("assigned_username"),
-        record.get("assigned_at"),
-        record.get("owner_user_id"),
-    )
-
-
-def _ensure_seeded() -> None:
-    global _seed_checked
-    if _seed_checked:
-        return
-
-    with _connect() as connection:
-        existing = connection.execute(f"SELECT COUNT(*) FROM {PERSONAL_CONFIGS_TABLE}").fetchone()
-        if existing and int(existing[0]) > 0:
-            _seed_checked = True
-            return
-
-        raw_data = load_json_file(PERSONAL_CONFIGS_STORAGE_PATH, {})
-        if not isinstance(raw_data, dict) or not raw_data:
-            return
-
-        for key, value in raw_data.items():
-            if not isinstance(key, str) or not isinstance(value, dict):
-                continue
-
-            config_id = value.get("config_id")
-            config_filename = value.get("config_filename")
-            config_text = value.get("config_text")
-            address = value.get("address")
-            public_key = value.get("public_key")
-            private_key = value.get("private_key")
-            preshared_key = value.get("preshared_key")
-            created_at = value.get("created_at")
-            expires_at = value.get("expires_at")
-
-            if not all(isinstance(item, str) for item in [config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at]):
-                continue
-
-            connection.execute(
-                f"""
-                INSERT OR REPLACE INTO {PERSONAL_CONFIGS_TABLE}
-                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    config_id,
-                    config_filename,
-                    config_text,
-                    address,
-                    public_key,
-                    private_key,
-                    preshared_key,
-                    created_at,
-                    expires_at,
-                    1 if bool(value.get("added_to_server", False)) else 0,
-                    value.get("revoked_at") if isinstance(value.get("revoked_at"), str) else None,
-                    value.get("assigned_user_id") if isinstance(value.get("assigned_user_id"), int) else None,
-                    value.get("assigned_username") if isinstance(value.get("assigned_username"), str) and value.get("assigned_username") else None,
-                    value.get("assigned_at") if isinstance(value.get("assigned_at"), str) and value.get("assigned_at") else None,
-                    value.get("owner_user_id") if isinstance(value.get("owner_user_id"), int) else None,
-                ),
-            )
-
-        connection.commit()
-    _seed_checked = True
-
-
-def _load_state() -> PersonalConfigsState:
-    _ensure_seeded()
-    state: PersonalConfigsState = {}
-    with _connect() as connection:
-        rows = connection.execute(
-            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id FROM {PERSONAL_CONFIGS_TABLE}"
-        ).fetchall()
-
-    for row in rows:
-        config_id, record = _row_to_record(row)
-        state[config_id] = record
-
-    return state
-
-
-def _save_state(state: PersonalConfigsState) -> None:
-    with _connect() as connection:
-        connection.execute(f"DELETE FROM {PERSONAL_CONFIGS_TABLE}")
-        for config_id, record in state.items():
-            connection.execute(
-                f"""
-                INSERT OR REPLACE INTO {PERSONAL_CONFIGS_TABLE}
-                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (config_id, *_encode_state_value(record)),
-            )
-        connection.commit()
-
-
-def _configured_client_prefix() -> str:
-    prefix = os.getenv("WIREGUARD_CLIENT_NETWORK_PREFIX", DEFAULT_CLIENT_NETWORK_PREFIX).strip()
-    return prefix.rstrip(".") if prefix else DEFAULT_CLIENT_NETWORK_PREFIX
-
-
-def _configured_start_octet() -> int:
-    raw = os.getenv("WIREGUARD_CLIENT_START_OCTET", str(DEFAULT_CLIENT_START_OCTET)).strip()
-    try:
-        value = int(raw)
-    except Exception:
-        value = DEFAULT_CLIENT_START_OCTET
-    return value if 2 <= value <= 254 else DEFAULT_CLIENT_START_OCTET
-
-
-def _configured_dns() -> str:
-    dns = os.getenv("WIREGUARD_DNS", DEFAULT_DNS).strip()
-    return dns if dns else DEFAULT_DNS
-
-
-def _configured_allowed_ips() -> str:
-    allowed_ips = os.getenv("WIREGUARD_ALLOWED_IPS", DEFAULT_ALLOWED_IPS).strip()
-    return allowed_ips if allowed_ips else DEFAULT_ALLOWED_IPS
-
-
-def _configured_mtu() -> int:
-    raw = os.getenv("WIREGUARD_MTU", str(DEFAULT_MTU)).strip()
-    try:
-        value = int(raw)
-    except Exception:
-        value = DEFAULT_MTU
-    return value if value > 0 else DEFAULT_MTU
-
-
-def _server_endpoint() -> str:
-    endpoint_host = os.getenv("WIREGUARD_ENDPOINT_HOST", "").strip()
-    endpoint_port_raw = os.getenv("WIREGUARD_ENDPOINT_PORT", str(DEFAULT_ENDPOINT_PORT)).strip()
-    if not endpoint_host:
-        return ""
-
-    try:
-        endpoint_port = int(endpoint_port_raw)
-    except Exception:
-        endpoint_port = DEFAULT_ENDPOINT_PORT
-
-    return f"{endpoint_host}:{endpoint_port}"
-
-
-def _server_public_key() -> str:
-    return os.getenv("WIREGUARD_SERVER_PUBLIC_KEY", "").strip()
-
-
-def _configured_awg_params() -> list[tuple[str, str]]:
-    values = [
-        ("Jc", os.getenv("WIREGUARD_AWG_JC", "").strip()),
-        ("Jmin", os.getenv("WIREGUARD_AWG_JMIN", "").strip()),
-        ("Jmax", os.getenv("WIREGUARD_AWG_JMAX", "").strip()),
-        ("S1", os.getenv("WIREGUARD_AWG_S1", "").strip()),
-        ("S2", os.getenv("WIREGUARD_AWG_S2", "").strip()),
-        ("S3", os.getenv("WIREGUARD_AWG_S3", "").strip()),
-        ("S4", os.getenv("WIREGUARD_AWG_S4", "").strip()),
-        ("H1", os.getenv("WIREGUARD_AWG_H1", "").strip()),
-        ("H2", os.getenv("WIREGUARD_AWG_H2", "").strip()),
-        ("H3", os.getenv("WIREGUARD_AWG_H3", "").strip()),
-        ("H4", os.getenv("WIREGUARD_AWG_H4", "").strip()),
-    ]
-    return [(name, value) for name, value in values if value]
-
-
-def _extract_client_octet(address: str) -> int | None:
-    try:
-        host = address.split("/", 1)[0]
-        octet = int(host.rsplit(".", 1)[1])
-    except Exception:
-        return None
-    return octet if 1 <= octet <= 254 else None
-
-
-def _collect_used_octets(prefix: str) -> set[int]:
-    used: set[int] = set()
-
-    state = _load_state()
-    for record in state.values():
-        revoked_at = record.get("revoked_at")
-        if isinstance(revoked_at, str) and revoked_at:
-            continue
-        address = record.get("address", "")
-        if not isinstance(address, str) or not address.startswith(f"{prefix}."):
-            continue
-        octet = _extract_client_octet(address)
-        if octet is not None:
-            used.add(octet)
-
-    return used
-
-
-def _allocate_address(used: set[int] | None = None) -> str:
-    prefix = _configured_client_prefix()
-    start_octet = _configured_start_octet()
-    used_octets = set(used) if isinstance(used, set) else _collect_used_octets(prefix)
-
-    candidate = start_octet
-    for _ in range(start_octet, 255):
-        if candidate not in used_octets:
-            used_octets.add(candidate)
-            if isinstance(used, set):
-                used.add(candidate)
-            return f"{prefix}.{candidate}/32"
-        candidate += 1
-        if candidate > 254:
-            candidate = start_octet
-
-    # Last-resort fallback; still returns valid address format.
-    return f"{prefix}.{start_octet}/32"
 
 
 def _generate_private_key() -> str:
@@ -369,11 +123,19 @@ def _new_config_id() -> str:
     return f"PERS-{secrets.token_urlsafe(6).upper()}"
 
 
-def _build_config_text(
-    private_key: str,
-    preshared_key: str,
-    address: str,
-) -> str:
+def _server_endpoint() -> str:
+    host = os.getenv("WIREGUARD_ENDPOINT_HOST", "").strip()
+    port = os.getenv("WIREGUARD_ENDPOINT_PORT", "48360").strip()
+    if not host:
+        return ""
+    return f"{host}:{port}"
+
+
+def _server_public_key() -> str:
+    return os.getenv("WIREGUARD_SERVER_PUBLIC_KEY", "").strip()
+
+
+def _build_config_text(private_key: str, preshared_key: str, address: str) -> str:
     endpoint = _server_endpoint()
     server_public_key = _server_public_key()
 
@@ -389,156 +151,68 @@ def _build_config_text(
         "[Interface]",
         f"PrivateKey = {private_key}",
         f"Address = {address}",
-        f"DNS = {_configured_dns()}",
-        f"MTU = {_configured_mtu()}",
+        f"DNS = {os.getenv('WIREGUARD_DNS', DEFAULT_DNS).strip() or DEFAULT_DNS}",
+        f"MTU = {int(os.getenv('WIREGUARD_MTU', str(DEFAULT_MTU)).strip() or DEFAULT_MTU)}",
     ]
 
-    for param_name, param_value in _configured_awg_params():
-        lines.append(f"{param_name} = {param_value}")
+    for env_key in ("WIREGUARD_AWG_JC", "WIREGUARD_AWG_JMIN", "WIREGUARD_AWG_JMAX", "WIREGUARD_AWG_S1", "WIREGUARD_AWG_S2", "WIREGUARD_AWG_S3", "WIREGUARD_AWG_S4", "WIREGUARD_AWG_H1", "WIREGUARD_AWG_H2", "WIREGUARD_AWG_H3", "WIREGUARD_AWG_H4"):
+        value = os.getenv(env_key, "").strip()
+        if value:
+            lines.append(f"{env_key.replace('WIREGUARD_AWG_', '')} = {value}")
 
-    lines.extend(
-        [
-            "",
-            "[Peer]",
-            f"PublicKey = {server_public_key}",
-            f"PresharedKey = {preshared_key}",
-            f"AllowedIPs = {_configured_allowed_ips()}",
-            f"Endpoint = {endpoint}",
-            "PersistentKeepalive = 25",
-        ]
-    )
+    lines.extend([
+        "",
+        "[Peer]",
+        f"PublicKey = {server_public_key}",
+    ])
+    if preshared_key:
+        lines.append(f"PresharedKey = {preshared_key}")
+
+    lines.extend([
+        f"AllowedIPs = {os.getenv('WIREGUARD_ALLOWED_IPS', DEFAULT_ALLOWED_IPS).strip() or DEFAULT_ALLOWED_IPS}",
+        f"Endpoint = {endpoint}",
+        "PersistentKeepalive = 25",
+    ])
 
     return "\n".join(lines)
 
 
-def revoke_expired_personal_configs() -> int:
+def revoke_expired_personal_configs() -> list[PersonalConfigRecord]:
     now = _now_utc()
-    revoked = 0
-    with _state_lock:
-        state = _load_state()
-        changed = False
-        for key, record in state.items():
+    revoked: list[PersonalConfigRecord] = []
+
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id FROM {PERSONAL_CONFIGS_TABLE}"
+        ).fetchall()
+
+        for row in rows:
+            record = _row_to_record(row)
+            if record.get("revoked_at"):
+                continue
             try:
                 if _parse_dt(record["expires_at"]) > now:
                     continue
             except Exception:
                 continue
 
-            if record.get("revoked_at"):
-                continue
+            if record.get("added_to_server") and record.get("public_key"):
+                remove_peer_from_server(record["public_key"], user_id=record.get("assigned_user_id") or 0)
 
-            if record.get("added_to_server"):
-                if remove_peer_from_server(record.get("public_key", ""), user_id=0):
-                    revoked += 1
-            record["revoked_at"] = now.isoformat()
-            state[key] = record
-            changed = True
+            revoked_at = now.isoformat()
+            connection.execute(
+                f"UPDATE {PERSONAL_CONFIGS_TABLE} SET revoked_at = ?, assigned_user_id = NULL, assigned_username = NULL, assigned_at = NULL WHERE config_id = ?",
+                (revoked_at, record["config_id"]),
+            )
+            record["revoked_at"] = revoked_at
+            record["assigned_user_id"] = None
+            record["assigned_username"] = None
+            record["assigned_at"] = None
+            revoked.append(record)
 
-        if changed:
-            _save_state(state)
+        connection.commit()
 
     return revoked
-
-
-def delete_personal_config(config_id: str) -> PersonalConfigRecord | None:
-    config_id = config_id.strip()
-    if not config_id:
-        return None
-
-    with _state_lock:
-        state = _load_state()
-        record = state.get(config_id)
-        if record is None:
-            return None
-
-        if record.get("added_to_server"):
-            remove_peer_from_server(record.get("public_key", ""), user_id=0)
-
-        record["revoked_at"] = _now_utc().isoformat()
-        record["added_to_server"] = False
-        state[config_id] = record
-        _save_state(state)
-        return record
-
-
-def assign_personal_config_to_user(config_id: str, user_id: int, username: str | None = None) -> bool:
-    config_id = config_id.strip()
-    if not config_id:
-        return False
-
-    with _state_lock:
-        state = _load_state()
-        record = state.get(config_id)
-        if record is None:
-            return False
-        if not record.get("added_to_server"):
-            return False
-
-        record["assigned_user_id"] = user_id
-        record["assigned_username"] = username.strip().lstrip("@") if isinstance(username, str) and username.strip() else None
-        record["assigned_at"] = _now_utc().isoformat()
-        state[config_id] = record
-        _save_state(state)
-
-    return True
-
-
-def list_pending_personal_configs_for_user(user_id: int) -> list[PersonalConfigRecord]:
-    now = _now_utc()
-    pending: list[PersonalConfigRecord] = []
-    for record in list_personal_configs():
-        if record.get("owner_user_id") != user_id:
-            continue
-        if not record.get("added_to_server"):
-            continue
-        if record.get("assigned_user_id") is not None:
-            continue
-        if record.get("revoked_at"):
-            continue
-        try:
-            if _parse_dt(record["expires_at"]) <= now:
-                continue
-        except Exception:
-            continue
-        pending.append(record)
-
-    pending.sort(key=lambda item: item.get("created_at", ""), reverse=True)
-    return pending
-
-
-def activate_pending_personal_configs_for_user(user_id: int, username: str | None = None) -> list[PersonalConfigRecord]:
-    activated: list[PersonalConfigRecord] = []
-    for record in list_pending_personal_configs_for_user(user_id):
-        if assign_personal_config_to_user(record["config_id"], user_id, username):
-            activated.append(record)
-    return activated
-
-
-def get_active_personal_config_for_user(user_id: int) -> PersonalConfigRecord | None:
-    now = _now_utc()
-    with _state_lock:
-        state = _load_state()
-
-    candidates: list[PersonalConfigRecord] = []
-    for record in state.values():
-        if record.get("assigned_user_id") != user_id:
-            continue
-        if not record.get("added_to_server"):
-            continue
-        if record.get("revoked_at"):
-            continue
-        try:
-            if _parse_dt(record["expires_at"]) <= now:
-                continue
-        except Exception:
-            continue
-        candidates.append(record)
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda item: item.get("expires_at", ""), reverse=True)
-    return candidates[0]
 
 
 def create_personal_configs(count: int, days: int, owner_user_id: int | None = None) -> list[PersonalConfigRecord]:
@@ -547,73 +221,81 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
     revoke_expired_personal_configs()
 
     created: list[PersonalConfigRecord] = []
-    with _state_lock:
-        state = _load_state()
-        used_octets = _collect_used_octets(_configured_client_prefix())
+    now = _now_utc()
 
+    with _connect() as connection:
         for _ in range(count):
             private_key = _generate_private_key()
             public_key = _derive_public_key(private_key)
             preshared_key = _generate_preshared_key()
-            address = _allocate_address(used_octets)
+            address = reserve_client_address()
 
-            now = _now_utc()
             expires_at = (now + timedelta(days=days)).isoformat()
             config_id = _new_config_id()
             config_filename = f"skull-vpn-{config_id}.conf"
             config_text = _build_config_text(private_key, preshared_key, address)
 
-            # Add peer to server BEFORE saving to DB to ensure atomicity.
-            added_to_server = add_peer_to_server_by_values(
+            added = add_peer_to_server_by_values(
                 public_key=public_key,
                 client_address=address,
                 client_preshared_key=preshared_key,
                 user_id=0,
             )
-            if not added_to_server:
+            if not added:
                 logging.error("Failed to add personal config peer to server: address=%s, public_key=%s", address, public_key)
-                octet = _extract_client_octet(address)
-                if octet is not None:
-                    used_octets.add(octet)
-                # Do NOT add to state/DB if peer addition failed
                 continue
 
-            logging.info("Personal config peer added to server: config_id=%s, address=%s", config_id, address)
+            connection.execute(
+                f"""
+                INSERT INTO {PERSONAL_CONFIGS_TABLE}
+                (config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, NULL, NULL, ?)
+                """,
+                (
+                    config_id,
+                    config_filename,
+                    config_text,
+                    address,
+                    public_key,
+                    private_key,
+                    preshared_key,
+                    now.isoformat(),
+                    expires_at,
+                    owner_user_id,
+                ),
+            )
 
-            record: PersonalConfigRecord = {
-                "config_id": config_id,
-                "config_filename": config_filename,
-                "config_text": config_text,
-                "address": address,
-                "public_key": public_key,
-                "private_key": private_key,
-                "preshared_key": preshared_key,
-                "created_at": now.isoformat(),
-                "expires_at": expires_at,
-                   "added_to_server": True,  # Only reach here if peer was added
-                "revoked_at": None,
-                "assigned_user_id": None,
-                "assigned_username": None,
-                "assigned_at": None,
-                "owner_user_id": owner_user_id,
-            }
-            state[config_id] = record
-            created.append(record)
-            logging.info("Personal config record created and added to state: config_id=%s, owner_user_id=%s", config_id, owner_user_id)
+            created.append(
+                {
+                    "config_id": config_id,
+                    "config_filename": config_filename,
+                    "config_text": config_text,
+                    "address": address,
+                    "public_key": public_key,
+                    "private_key": private_key,
+                    "preshared_key": preshared_key,
+                    "created_at": now.isoformat(),
+                    "expires_at": expires_at,
+                    "added_to_server": True,
+                    "revoked_at": None,
+                    "assigned_user_id": None,
+                    "assigned_username": None,
+                    "assigned_at": None,
+                    "owner_user_id": owner_user_id,
+                }
+            )
 
-        try:
-            _save_state(state)
-            logging.info("Personal configs saved to DB: total created=%d", len(created))
-        except Exception as e:
-            logging.exception("Failed to save personal configs to DB: error=%s", e)
+        connection.commit()
 
     return created
 
 
 def list_personal_configs() -> list[PersonalConfigRecord]:
-    with _state_lock:
-        state = _load_state()
-        return list(state.values())
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id FROM {PERSONAL_CONFIGS_TABLE}"
+        ).fetchall()
+    return [_row_to_record(row) for row in rows]
 
 
 def list_active_personal_configs() -> list[PersonalConfigRecord]:
@@ -634,10 +316,148 @@ def list_active_personal_configs() -> list[PersonalConfigRecord]:
 
 
 def list_active_personal_configs_for_user(user_id: int) -> list[PersonalConfigRecord]:
-    active: list[PersonalConfigRecord] = []
-    for record in list_active_personal_configs():
+    records = [rec for rec in list_active_personal_configs() if rec.get("assigned_user_id") == user_id]
+    records.sort(key=lambda item: item.get("expires_at", ""), reverse=True)
+    return records
+
+
+def list_pending_personal_configs_for_user(user_id: int) -> list[PersonalConfigRecord]:
+    now = _now_utc()
+    pending: list[PersonalConfigRecord] = []
+    for record in list_personal_configs():
         if record.get("assigned_user_id") != user_id:
             continue
-        active.append(record)
-    active.sort(key=lambda item: item.get("expires_at", ""), reverse=True)
-    return active
+        if record.get("revoked_at"):
+            continue
+        if record.get("added_to_server"):
+            continue
+        try:
+            if _parse_dt(record["expires_at"]) <= now:
+                continue
+        except Exception:
+            continue
+        pending.append(record)
+
+    pending.sort(key=lambda item: item.get("expires_at", ""), reverse=True)
+    return pending
+
+
+def get_active_personal_config_for_user(user_id: int) -> PersonalConfigRecord | None:
+    records = list_active_personal_configs_for_user(user_id)
+    if not records:
+        return None
+    return records[0]
+
+
+def assign_personal_config_to_user(config_id: str, user_id: int, username: str | None = None) -> PersonalConfigRecord | None:
+    config_id = (config_id or "").strip()
+    if not config_id:
+        return None
+
+    now = _now_utc().isoformat()
+    with _connect() as connection:
+        row = connection.execute(
+            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id FROM {PERSONAL_CONFIGS_TABLE} WHERE config_id = ?",
+            (config_id,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        record = _row_to_record(row)
+        if record.get("revoked_at"):
+            return None
+        if not record.get("added_to_server"):
+            return None
+
+        connection.execute(
+            f"UPDATE {PERSONAL_CONFIGS_TABLE} SET assigned_user_id = ?, assigned_username = ?, assigned_at = ? WHERE config_id = ?",
+            (user_id, (username or "").strip() or None, now, config_id),
+        )
+        connection.commit()
+
+    record["assigned_user_id"] = user_id
+    record["assigned_username"] = (username or "").strip() or None
+    record["assigned_at"] = now
+    return record
+
+
+def activate_pending_personal_configs_for_user(user_id: int) -> list[PersonalConfigRecord]:
+    activated: list[PersonalConfigRecord] = []
+    now = _now_utc().isoformat()
+
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id FROM {PERSONAL_CONFIGS_TABLE} WHERE assigned_user_id = ?",
+            (user_id,),
+        ).fetchall()
+
+        for row in rows:
+            record = _row_to_record(row)
+            if record.get("revoked_at") or record.get("added_to_server"):
+                continue
+
+            ok = add_peer_to_server_by_values(
+                public_key=record["public_key"],
+                client_address=record["address"],
+                client_preshared_key=record.get("preshared_key", ""),
+                user_id=user_id,
+            )
+            if not ok:
+                logging.error("Failed to activate personal config: config_id=%s", record["config_id"])
+                continue
+
+            connection.execute(
+                f"UPDATE {PERSONAL_CONFIGS_TABLE} SET added_to_server = 1, assigned_at = COALESCE(assigned_at, ?) WHERE config_id = ?",
+                (now, record["config_id"]),
+            )
+            record["added_to_server"] = True
+            if not record.get("assigned_at"):
+                record["assigned_at"] = now
+            activated.append(record)
+
+        connection.commit()
+
+    return activated
+
+
+def delete_personal_config(config_id: str) -> PersonalConfigRecord | None:
+    config_id = (config_id or "").strip()
+    if not config_id:
+        return None
+
+    with _connect() as connection:
+        row = connection.execute(
+            f"SELECT config_id, config_filename, config_text, address, public_key, private_key, preshared_key, created_at, expires_at, added_to_server, revoked_at, assigned_user_id, assigned_username, assigned_at, owner_user_id FROM {PERSONAL_CONFIGS_TABLE} WHERE config_id = ?",
+            (config_id,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        record = _row_to_record(row)
+        if record.get("public_key"):
+            remove_peer_from_server(record["public_key"], user_id=record.get("assigned_user_id") or 0)
+
+        connection.execute(f"DELETE FROM {PERSONAL_CONFIGS_TABLE} WHERE config_id = ?", (config_id,))
+        connection.commit()
+
+    return record
+
+
+def wipe_all_personal_configs(*, remove_server_peers: bool = True) -> dict[str, int]:
+    removed_db = 0
+    removed_server = 0
+
+    with _connect() as connection:
+        rows = connection.execute(f"SELECT public_key FROM {PERSONAL_CONFIGS_TABLE}").fetchall()
+        public_keys = [str(row[0] or "") for row in rows if str(row[0] or "")]
+        removed_db = len(public_keys)
+
+        connection.execute(f"DELETE FROM {PERSONAL_CONFIGS_TABLE}")
+        connection.commit()
+
+    if remove_server_peers:
+        for key in public_keys:
+            if remove_peer_from_server(key, user_id=0):
+                removed_server += 1
+
+    return {"removed_db_configs": removed_db, "removed_server_peers": removed_server}
