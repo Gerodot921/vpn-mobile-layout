@@ -116,6 +116,9 @@ def _derive_public_key(private_key_b64: str) -> str:
 
 
 def _generate_preshared_key() -> str:
+    global_psk = os.getenv("WIREGUARD_GLOBAL_PRESHARED_KEY", "").strip()
+    if global_psk:
+        return global_psk
     return base64.b64encode(secrets.token_bytes(32)).decode("ascii")
 
 
