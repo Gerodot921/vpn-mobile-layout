@@ -155,10 +155,23 @@ def _build_config_text(private_key: str, preshared_key: str, address: str) -> st
         f"MTU = {int(os.getenv('WIREGUARD_MTU', str(DEFAULT_MTU)).strip() or DEFAULT_MTU)}",
     ]
 
-    for env_key in ("WIREGUARD_AWG_JC", "WIREGUARD_AWG_JMIN", "WIREGUARD_AWG_JMAX", "WIREGUARD_AWG_S1", "WIREGUARD_AWG_S2", "WIREGUARD_AWG_S3", "WIREGUARD_AWG_S4", "WIREGUARD_AWG_H1", "WIREGUARD_AWG_H2", "WIREGUARD_AWG_H3", "WIREGUARD_AWG_H4"):
+    awg_env_map = (
+        ("Jc", "WIREGUARD_AWG_JC"),
+        ("Jmin", "WIREGUARD_AWG_JMIN"),
+        ("Jmax", "WIREGUARD_AWG_JMAX"),
+        ("S1", "WIREGUARD_AWG_S1"),
+        ("S2", "WIREGUARD_AWG_S2"),
+        ("S3", "WIREGUARD_AWG_S3"),
+        ("S4", "WIREGUARD_AWG_S4"),
+        ("H1", "WIREGUARD_AWG_H1"),
+        ("H2", "WIREGUARD_AWG_H2"),
+        ("H3", "WIREGUARD_AWG_H3"),
+        ("H4", "WIREGUARD_AWG_H4"),
+    )
+    for param_name, env_key in awg_env_map:
         value = os.getenv(env_key, "").strip()
         if value:
-            lines.append(f"{env_key.replace('WIREGUARD_AWG_', '')} = {value}")
+            lines.append(f"{param_name} = {value}")
 
     lines.extend([
         "",
