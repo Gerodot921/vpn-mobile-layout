@@ -590,6 +590,22 @@ def get_wireguard_profile(user_id: int) -> WireGuardProfile | None:
             return _fetch_profile(connection, user_id)
 
 
+def list_wireguard_profiles() -> list[WireGuardProfile]:
+    with _state_lock:
+        _ensure_seeded()
+        with _connect() as connection:
+            rows = connection.execute(
+                f"SELECT user_id, profile_id, private_key, public_key, preshared_key, address, endpoint, dns, allowed_ips, mtu, configured, created_at, updated_at, config_text, config_filename FROM {WIREGUARD_PROFILES_TABLE}"
+            ).fetchall()
+
+    profiles: list[WireGuardProfile] = []
+    for row in rows:
+        profile = _profile_row_to_record(row)
+        if profile is not None:
+            profiles.append(profile)
+    return profiles
+
+
 def get_wireguard_config_text(user_id: int) -> str | None:
     profile = get_wireguard_profile(user_id)
     if profile is None:
@@ -693,6 +709,16 @@ def add_peer_to_server_by_values(
         return False
 
     client_public_key = public_key
+
+    # Keep one peer per /32 address: drop stale peer with same allowed-ips.
+    dump = _get_server_peers_dump()
+    if dump:
+        for existing_public_key, existing_allowed in _parse_server_peer_dump(dump):
+            if existing_allowed != client_address:
+                continue
+            if existing_public_key == client_public_key:
+                continue
+            remove_peer_from_server(existing_public_key, user_id=user_id)
 
     if client_preshared_key:
         cmd = [

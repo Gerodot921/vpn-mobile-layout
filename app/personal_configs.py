@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
 from app.json_storage import get_storage_connection, load_json_file
-from app.wireguard import add_peer_to_server_by_values, remove_peer_from_server
+from app.wireguard import add_peer_to_server_by_values, list_wireguard_profiles, remove_peer_from_server
 
 PERSONAL_CONFIGS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_configs.json"
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
@@ -318,6 +318,14 @@ def _collect_used_octets(prefix: str) -> set[int]:
         if isinstance(revoked_at, str) and revoked_at:
             continue
         address = record.get("address", "")
+        if not isinstance(address, str) or not address.startswith(f"{prefix}."):
+            continue
+        octet = _extract_client_octet(address)
+        if octet is not None:
+            used.add(octet)
+
+    for profile in list_wireguard_profiles():
+        address = profile.get("address", "")
         if not isinstance(address, str) or not address.startswith(f"{prefix}."):
             continue
         octet = _extract_client_octet(address)
