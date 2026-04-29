@@ -44,13 +44,12 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--user", type=int, help="User ID to reconcile")
     p.add_argument("--all", action="store_true", help="Reconcile all DB profiles")
-    p.add_argument("--sync", action="store_true", help="Full sync on startup (fix all profiles + remove orphans)")
+    p.add_argument("--sync", action="store_true", help="Deprecated: startup sync is disabled")
     p.add_argument("--fix", action="store_true", help="Apply fixes (remove/add) rather than dry-run")
     args = p.parse_args()
 
     if args.sync:
-        res = wireguard.sync_all_peers_on_startup()
-        print("Sync result:", res)
+        print("Sync mode is disabled")
         return
 
     if not args.user and not args.all:
