@@ -575,8 +575,8 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
                 octet = _extract_client_octet(address)
                 if octet is not None:
                     used_octets.add(octet)
-                   # Do NOT add to state/DB if peer addition failed
-                   continue
+                # Do NOT add to state/DB if peer addition failed
+                continue
 
             logging.info("Personal config peer added to server: config_id=%s, address=%s", config_id, address)
 
