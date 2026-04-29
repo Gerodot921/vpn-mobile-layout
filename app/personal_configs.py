@@ -617,3 +617,25 @@ def list_active_personal_configs_for_user(user_id: int) -> list[PersonalConfigRe
         active.append(record)
     active.sort(key=lambda item: item.get("expires_at", ""), reverse=True)
     return active
+
+
+def wipe_all_personal_configs(*, remove_server_peers: bool = False) -> dict:
+    """Delete all personal configs from SQLite and optionally remove their peers from the server."""
+    with _state_lock:
+        state = _load_state()
+        records = list(state.values())
+        removed_server_peers = 0
+
+        if remove_server_peers:
+            for record in records:
+                public_key = str(record.get("public_key") or "").strip()
+                if public_key and remove_peer_from_server(public_key, user_id=0):
+                    removed_server_peers += 1
+
+        _save_state({})
+
+    return {
+        "ok": True,
+        "removed_server_peers": removed_server_peers,
+        "deleted_configs": len(records),
+    }

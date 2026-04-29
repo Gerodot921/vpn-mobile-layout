@@ -858,6 +858,25 @@ def _get_server_peers_dump() -> str | None:
     return out
 
 
+def _parse_server_peer_dump(dump: str) -> list[tuple[str, str]]:
+    peers: list[tuple[str, str]] = []
+    for raw_line in dump.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("interface:"):
+            continue
+
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+
+        public_key = parts[0].strip()
+        allowed_ips = parts[3].strip()
+        if public_key:
+            peers.append((public_key, allowed_ips))
+
+    return peers
+
+
 def reconcile_user_peer(user_id: int, *, fix: bool = False) -> dict:
     """Ensure server has a peer matching DB profile for `user_id`.
 
@@ -922,5 +941,75 @@ def reconcile_user_peer(user_id: int, *, fix: bool = False) -> dict:
         return {"ok": ok_add, "action": "replaced", "details": "replaced_peer" if ok_add else "add_failed"}
 
     return {"ok": False, "action": "mismatch", "details": f"Server pub {found_pub} != expected {expected_pub}"}
+
+
+def reconcile_all_peers(*, fix: bool = False, purge_extras: bool = False) -> dict:
+    """Reconcile all DB WireGuard profiles against the server state.
+
+    If `purge_extras` is True, remove server peers whose public keys are not
+    present in the database before reconciling the DB-backed peers.
+    """
+    state = _load_state()
+    dump = _get_server_peers_dump()
+    if dump is None:
+        return {"ok": False, "action": "no_dump", "details": "Cannot read server peers", "results": []}
+
+    server_peers = _parse_server_peer_dump(dump)
+    expected_public_keys = {
+        str(profile.get("public_key") or "").strip()
+        for profile in state.get("profiles", {}).values()
+        if isinstance(profile, dict) and str(profile.get("public_key") or "").strip()
+    }
+
+    removed_extras: list[str] = []
+    if fix and purge_extras:
+        for public_key, _allowed_ips in server_peers:
+            if public_key in expected_public_keys:
+                continue
+            if remove_peer_from_server(public_key, user_id=0):
+                removed_extras.append(public_key)
+
+    results: list[dict[str, Any]] = []
+    user_keys = sorted(
+        state.get("profiles", {}).keys(),
+        key=lambda item: int(item) if str(item).isdigit() else str(item),
+    )
+    for user_key in user_keys:
+        try:
+            user_id = int(user_key)
+        except Exception:
+            continue
+        results.append(reconcile_user_peer(user_id, fix=fix))
+
+    return {
+        "ok": all(bool(item.get("ok", False)) for item in results),
+        "action": "reconciled_all",
+        "details": "Reconciled DB peers against server",
+        "purged_extras": removed_extras,
+        "results": results,
+    }
+
+
+def wipe_all_wireguard_state(*, remove_server_peers: bool = False) -> dict:
+    """Remove all WireGuard profiles from SQLite and optionally delete server peers."""
+    with _state_lock:
+        state = _load_state()
+        profiles = list(state.get("profiles", {}).values())
+        removed_server_peers = 0
+
+        if remove_server_peers:
+            for profile in profiles:
+                public_key = str(profile.get("public_key") or "").strip()
+                user_id = int(profile.get("user_id") or 0) if isinstance(profile, dict) else 0
+                if public_key and remove_peer_from_server(public_key, user_id=user_id):
+                    removed_server_peers += 1
+
+        _save_state(_state_default())
+
+    return {
+        "ok": True,
+        "removed_server_peers": removed_server_peers,
+        "deleted_profiles": len(profiles),
+    }
 
 

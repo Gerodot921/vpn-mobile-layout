@@ -4,6 +4,7 @@ Small CLI to reconcile WireGuard peers from DB to server.
 Usage:
   python scripts/reconcile_peers.py --user 12345 --fix
   python scripts/reconcile_peers.py --all --dry-run
+    python scripts/reconcile_peers.py --all --fix --purge-extras
 """
 import os
 import sys
@@ -46,6 +47,7 @@ def main():
     p.add_argument("--all", action="store_true", help="Reconcile all DB profiles")
     p.add_argument("--sync", action="store_true", help="Deprecated: startup sync is disabled")
     p.add_argument("--fix", action="store_true", help="Apply fixes (remove/add) rather than dry-run")
+    p.add_argument("--purge-extras", action="store_true", help="Remove server peers that do not exist in the DB before reconciling")
     args = p.parse_args()
 
     if args.sync:
@@ -60,11 +62,8 @@ def main():
         print(res)
         return
 
-    state = wireguard._load_state()
-    for user_key, profile in state.get('profiles', {}).items():
-        uid = int(user_key)
-        res = wireguard.reconcile_user_peer(uid, fix=args.fix)
-        print(f"{uid}: {res}")
+    res = wireguard.reconcile_all_peers(fix=args.fix, purge_extras=args.purge_extras)
+    print(res)
 
 
 if __name__ == "__main__":
