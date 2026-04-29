@@ -41,7 +41,7 @@ def _load_dotenv(path: str) -> None:
 _load_dotenv(os.path.join(ROOT, ".env"))
 
 from app import wireguard
-from app.personal_configs import list_active_personal_configs
+from app.personal_configs import delete_personal_config, list_active_personal_configs
 
 
 def _parse_iso_dt(value: str) -> datetime | None:
@@ -54,34 +54,72 @@ def _parse_iso_dt(value: str) -> datetime | None:
         return None
 
 
-def _expected_peers_all_sources() -> list[dict[str, str | int]]:
+def _expected_peers_all_sources(*, fix: bool = False) -> tuple[list[dict[str, str | int]], list[dict[str, str]], list[str]]:
     expected: list[dict[str, str | int]] = []
+    conflicts: list[dict[str, str]] = []
+    revoked_personal: list[str] = []
+    address_owner: dict[str, str] = {}
 
     for profile in wireguard.list_wireguard_profiles():
+        address = str(profile.get("address") or "").strip()
+        public_key = str(profile.get("public_key") or "").strip()
+        if not address or not public_key:
+            continue
+
+        address_owner[address] = f"wireguard:{public_key}"
         expected.append(
             {
                 "source": "wireguard",
                 "user_id": int(profile.get("user_id", 0)),
-                "public_key": str(profile.get("public_key") or "").strip(),
-                "address": str(profile.get("address") or "").strip(),
+                "public_key": public_key,
+                "address": address,
                 "preshared_key": str(profile.get("preshared_key") or "").strip(),
             }
         )
 
     now = datetime.now(timezone.utc)
-    for record in list_active_personal_configs():
+    personal_records = sorted(
+        list_active_personal_configs(),
+        key=lambda item: str(item.get("created_at") or ""),
+        reverse=True,
+    )
+    for record in personal_records:
         if record.get("revoked_at"):
             continue
         expires_at = _parse_iso_dt(str(record.get("expires_at") or ""))
         if expires_at is not None and expires_at <= now:
             continue
+
+        config_id = str(record.get("config_id") or "").strip()
+        address = str(record.get("address") or "").strip()
+        public_key = str(record.get("public_key") or "").strip()
+        if not address or not public_key:
+            continue
+
+        if address in address_owner:
+            conflicts.append(
+                {
+                    "config_id": config_id,
+                    "address": address,
+                    "public_key": public_key,
+                    "owner": address_owner[address],
+                }
+            )
+            if fix and config_id:
+                deleted = delete_personal_config(config_id)
+                if deleted is not None:
+                    revoked_personal.append(config_id)
+            continue
+
+        address_owner[address] = f"personal:{public_key}"
         expected.append(
             {
                 "source": "personal",
                 "user_id": int(record.get("assigned_user_id") or 0),
-                "public_key": str(record.get("public_key") or "").strip(),
-                "address": str(record.get("address") or "").strip(),
+                "public_key": public_key,
+                "address": address,
                 "preshared_key": str(record.get("preshared_key") or "").strip(),
+                "config_id": config_id,
             }
         )
 
@@ -93,11 +131,11 @@ def _expected_peers_all_sources() -> list[dict[str, str | int]]:
             continue
         dedup[public_key] = peer
 
-    return list(dedup.values())
+    return list(dedup.values()), conflicts, revoked_personal
 
 
 def _sync_all_sources(*, fix: bool, purge_extras: bool) -> dict:
-    expected = _expected_peers_all_sources()
+    expected, conflicts, revoked_personal = _expected_peers_all_sources(fix=fix)
     expected_public_keys = {str(item["public_key"]) for item in expected}
 
     results: list[dict[str, object]] = []
@@ -143,6 +181,8 @@ def _sync_all_sources(*, fix: bool, purge_extras: bool) -> dict:
         "action": "reconciled_all_sources",
         "details": "Reconciled wireguard + active personal configs",
         "expected": len(expected),
+        "conflicts": conflicts,
+        "revoked_personal": revoked_personal,
         "results": results,
         "purged_extras": purged_extras,
     }
