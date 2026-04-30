@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
 from app.json_storage import get_storage_connection
+from app.volume_sync import export_config_text, remove_exported_config
 
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
 WIREGUARD_STATE_TABLE = "wireguard_state"
@@ -306,6 +307,22 @@ def _save_state(state: WireGuardState) -> None:
         connection.commit()
 
 
+def _export_wireguard_profile(profile: WireGuardProfile) -> None:
+    try:
+        export_config_text("wireguard", str(profile.get("config_filename") or "skull-vpn-wireguard.conf"), str(profile.get("config_text") or ""))
+    except Exception:
+        logging.exception("Failed to export wireguard profile config for user_id=%s", profile.get("user_id"))
+
+
+def _remove_exported_wireguard_profile(profile: WireGuardProfile | None) -> None:
+    if not profile:
+        return
+    try:
+        remove_exported_config("wireguard", str(profile.get("config_filename") or ""))
+    except Exception:
+        logging.exception("Failed to remove exported wireguard profile for user_id=%s", profile.get("user_id"))
+
+
 def _user_key(user_id: int) -> str:
     return str(user_id)
 
@@ -440,6 +457,18 @@ def _next_client_octet(state: WireGuardState) -> int:
     prefix = _configured_client_prefix()
     used_octets = _used_octets(state, prefix)
 
+    # Also consider addresses present on the running WireGuard server.
+    try:
+        for allowed in list_server_peer_allowed_ips():
+            if not allowed.startswith(f"{prefix}."):
+                continue
+            octet = _extract_client_octet(allowed)
+            if octet is not None:
+                used_octets.add(octet)
+    except Exception:
+        # Non-fatal: if we can't read server peers, fall back to DB-only allocation.
+        logging.exception("Failed to include server peers into used-octets; falling back to DB-only allocator")
+
     next_octet = state.get("next_client_octet", DEFAULT_CLIENT_START_OCTET)
     if not isinstance(next_octet, int) or next_octet < start_octet:
         next_octet = start_octet
@@ -555,6 +584,7 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
             profile = _build_profile(user_id, state)
             state["profiles"][user_key] = profile
             _save_state(state)
+            _export_wireguard_profile(profile)
             return profile
 
         # Migrate legacy low-octet addresses to configured range (e.g. from .2 to .100+).
@@ -580,6 +610,7 @@ def ensure_wireguard_profile(user_id: int) -> WireGuardProfile:
         profile["config_text"] = _build_config_text(profile)
         state["profiles"][user_key] = profile
         _save_state(state)
+        _export_wireguard_profile(profile)
         return profile
 
 
@@ -795,10 +826,12 @@ def reset_wireguard_profile(user_id: int) -> WireGuardProfile:
         old_profile = state["profiles"].get(user_key)
         if old_profile is not None:
             remove_peer_from_server(old_profile.get("public_key", ""), user_id)
+            _remove_exported_wireguard_profile(old_profile)
 
         profile = _build_profile(user_id, state)
         state["profiles"][user_key] = profile
         _save_state(state)
+        _export_wireguard_profile(profile)
         return profile
 
 
@@ -810,6 +843,7 @@ def delete_wireguard_profile(user_id: int) -> WireGuardProfile | None:
         if profile is None:
             return None
         _save_state(state)
+        _remove_exported_wireguard_profile(profile)
 
     old_public_key = profile.get("public_key", "")
     if old_public_key:
@@ -901,6 +935,20 @@ def _parse_server_peer_dump(dump: str) -> list[tuple[str, str]]:
             peers.append((public_key, allowed_ips))
 
     return peers
+
+
+def list_server_peer_allowed_ips() -> list[str]:
+    """Return current allowed-ips values from the running WireGuard server."""
+    dump = _get_server_peers_dump()
+    if not dump:
+        return []
+
+    allowed_ips: list[str] = []
+    for _public_key, allowed in _parse_server_peer_dump(dump):
+        allowed = allowed.strip()
+        if allowed:
+            allowed_ips.append(allowed)
+    return allowed_ips
 
 
 def reconcile_user_peer(user_id: int, *, fix: bool = False) -> dict:
@@ -1029,6 +1077,9 @@ def wipe_all_wireguard_state(*, remove_server_peers: bool = False) -> dict:
                 user_id = int(profile.get("user_id") or 0) if isinstance(profile, dict) else 0
                 if public_key and remove_peer_from_server(public_key, user_id=user_id):
                     removed_server_peers += 1
+
+        for profile in profiles:
+            _remove_exported_wireguard_profile(profile)
 
         _save_state(_state_default())
 

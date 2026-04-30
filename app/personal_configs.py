@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -14,7 +15,8 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
 from app.json_storage import get_storage_connection, load_json_file
-from app.wireguard import add_peer_to_server_by_values, list_wireguard_profiles, remove_peer_from_server
+from app.volume_sync import export_config_text, remove_exported_config
+from app.wireguard import add_peer_to_server_by_values, list_server_peer_allowed_ips, list_wireguard_profiles, remove_peer_from_server
 
 PERSONAL_CONFIGS_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "personal_configs.json"
 WIREGUARD_STORAGE_PATH = Path(__file__).resolve().parents[1] / "data" / "wireguard_profiles.json"
@@ -232,6 +234,22 @@ def _save_state(state: PersonalConfigsState) -> None:
         connection.commit()
 
 
+def _export_personal_config(record: PersonalConfigRecord) -> None:
+    try:
+        export_config_text("personal", str(record.get("config_filename") or "skull-vpn-personal.conf"), str(record.get("config_text") or ""))
+    except Exception:
+        logging.exception("Failed to export personal config %s", record.get("config_id"))
+
+
+def _remove_exported_personal_config(record: PersonalConfigRecord | None) -> None:
+    if not record:
+        return
+    try:
+        remove_exported_config("personal", str(record.get("config_filename") or ""))
+    except Exception:
+        logging.exception("Failed to remove exported personal config %s", record.get("config_id"))
+
+
 def _configured_client_prefix() -> str:
     prefix = os.getenv("WIREGUARD_CLIENT_NETWORK_PREFIX", DEFAULT_CLIENT_NETWORK_PREFIX).strip()
     return prefix.rstrip(".") if prefix else DEFAULT_CLIENT_NETWORK_PREFIX
@@ -329,6 +347,13 @@ def _collect_used_octets(prefix: str) -> set[int]:
         if not isinstance(address, str) or not address.startswith(f"{prefix}."):
             continue
         octet = _extract_client_octet(address)
+        if octet is not None:
+            used.add(octet)
+
+    for allowed in list_server_peer_allowed_ips():
+        if not isinstance(allowed, str) or not allowed.startswith(f"{prefix}."):
+            continue
+        octet = _extract_client_octet(allowed)
         if octet is not None:
             used.add(octet)
 
@@ -437,6 +462,7 @@ def revoke_expired_personal_configs() -> int:
             if record.get("added_to_server"):
                 if remove_peer_from_server(record.get("public_key", ""), user_id=0):
                     revoked += 1
+            _remove_exported_personal_config(record)
             record["revoked_at"] = now.isoformat()
             state[key] = record
             changed = True
@@ -461,6 +487,7 @@ def delete_personal_config(config_id: str) -> PersonalConfigRecord | None:
         if record.get("added_to_server"):
             remove_peer_from_server(record.get("public_key", ""), user_id=0)
 
+        _remove_exported_personal_config(record)
         record["revoked_at"] = _now_utc().isoformat()
         record["added_to_server"] = False
         state[config_id] = record
@@ -590,6 +617,7 @@ def create_personal_configs(count: int, days: int, owner_user_id: int | None = N
             }
             state[config_id] = record
             created.append(record)
+            _export_personal_config(record)
 
         _save_state(state)
 
@@ -639,6 +667,9 @@ def wipe_all_personal_configs(*, remove_server_peers: bool = False) -> dict:
                 public_key = str(record.get("public_key") or "").strip()
                 if public_key and remove_peer_from_server(public_key, user_id=0):
                     removed_server_peers += 1
+
+        for record in records:
+            _remove_exported_personal_config(record)
 
         _save_state({})
 

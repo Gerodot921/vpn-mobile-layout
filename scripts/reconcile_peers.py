@@ -42,6 +42,7 @@ _load_dotenv(os.path.join(ROOT, ".env"))
 
 from app import wireguard
 from app.personal_configs import delete_personal_config, list_active_personal_configs
+from app.volume_sync import export_config_text, reload_wireguard_container, write_volume_manifest
 
 
 def _parse_iso_dt(value: str) -> datetime | None:
@@ -188,6 +189,39 @@ def _sync_all_sources(*, fix: bool, purge_extras: bool) -> dict:
     }
 
 
+def _sync_volume(*, reload_container: bool) -> dict:
+    exported: list[dict[str, str]] = []
+
+    for profile in wireguard.list_wireguard_profiles():
+        filename = str(profile.get("config_filename") or "")
+        content = str(profile.get("config_text") or "")
+        if not filename:
+            continue
+        export_config_text("wireguard", filename, content)
+        exported.append({"category": "wireguard", "filename": filename})
+
+    for record in list_active_personal_configs():
+        if record.get("revoked_at"):
+            continue
+        filename = str(record.get("config_filename") or "")
+        content = str(record.get("config_text") or "")
+        if not filename:
+            continue
+        export_config_text("personal", filename, content)
+        exported.append({"category": "personal", "filename": filename})
+
+    manifest_path = write_volume_manifest(exported)
+    reload_result = reload_wireguard_container() if reload_container else {"ok": True, "action": "skipped"}
+
+    return {
+        "ok": bool(reload_result.get("ok", True)),
+        "action": "synced_volume",
+        "exported": len(exported),
+        "manifest": str(manifest_path),
+        "reload": reload_result,
+    }
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--user", type=int, help="User ID to reconcile")
@@ -196,6 +230,8 @@ def main():
     p.add_argument("--sync", action="store_true", help="Deprecated: startup sync is disabled")
     p.add_argument("--fix", action="store_true", help="Apply fixes (remove/add) rather than dry-run")
     p.add_argument("--purge-extras", action="store_true", help="Remove server peers that do not exist in the DB before reconciling")
+    p.add_argument("--sync-volume", action="store_true", help="Export configs to the configured volume after reconcile")
+    p.add_argument("--reload-container", action="store_true", help="Run WIREGUARD_VOLUME_RELOAD_COMMAND after volume sync")
     args = p.parse_args()
 
     if args.sync:
@@ -212,10 +248,16 @@ def main():
 
     if args.all_sources:
         res = _sync_all_sources(fix=args.fix, purge_extras=args.purge_extras)
+        if args.sync_volume:
+            volume_res = _sync_volume(reload_container=args.reload_container)
+            res = {"reconcile": res, "volume": volume_res, "ok": bool(res.get("ok", False)) and bool(volume_res.get("ok", False))}
         print(res)
         return
 
     res = wireguard.reconcile_all_peers(fix=args.fix, purge_extras=args.purge_extras)
+    if args.sync_volume:
+        volume_res = _sync_volume(reload_container=args.reload_container)
+        res = {"reconcile": res, "volume": volume_res, "ok": bool(res.get("ok", False)) and bool(volume_res.get("ok", False))}
     print(res)
 
 
