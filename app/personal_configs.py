@@ -27,7 +27,7 @@ DEFAULT_CLIENT_NETWORK_PREFIX = "10.66.66"
 DEFAULT_CLIENT_START_OCTET = 2
 DEFAULT_ALLOWED_IPS = "0.0.0.0/0"
 DEFAULT_DNS = "1.1.1.1, 8.8.8.8"
-DEFAULT_MTU = 1280
+DEFAULT_MTU = 1376
 
 _state_lock = Lock()
 _seed_checked = False
@@ -275,7 +275,7 @@ def _configured_allowed_ips() -> str:
 
 
 def _configured_mtu() -> int:
-    raw = os.getenv("WIREGUARD_MTU", str(DEFAULT_MTU)).strip()
+    raw = os.getenv("WIREGUARD_PERSONAL_MTU", str(DEFAULT_MTU)).strip()
     try:
         value = int(raw)
     except Exception:
